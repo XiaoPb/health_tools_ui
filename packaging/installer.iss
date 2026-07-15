@@ -1,0 +1,37 @@
+#define MyAppName "Health Tools UI"
+#define MyAppVersion "0.1.0"
+#define MyAppPublisher "XiaoPb"
+#define MyAppExeName "HealthToolsUI.exe"
+
+[Setup]
+AppId={{7DA61ACD-0B77-4B6E-BDA9-4BF5DCC557AD}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+DefaultDirName={autopf}\Health Tools UI
+DefaultGroupName={#MyAppName}
+OutputDir=..\dist
+OutputBaseFilename=HealthToolsUI-Setup
+Compression=lzma2
+SolidCompression=yes
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+PrivilegesRequired=lowest
+UninstallDisplayIcon={app}\{#MyAppExeName}
+
+[Files]
+Source: "..\dist\HealthToolsUI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Dirs]
+Name: "{app}\offline"
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+

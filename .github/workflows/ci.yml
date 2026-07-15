@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked --group dev
+      - run: uv run ruff check .
+      - run: uv run pytest --cov=health_tools_ui --cov-report=term-missing
+      - run: uv run python scripts/qml_smoke.py
+      - run: uv run pyinstaller packaging/health_tools_ui.spec --noconfirm
+      - run: New-Item -ItemType Directory -Force dist/HealthToolsUI/offline
+      - run: dist/HealthToolsUI/HealthToolsUI.exe --worker "[`"--help`"]"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HealthToolsUI-windows-portable
+          path: dist/HealthToolsUI/

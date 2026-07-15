@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --group dev
+      - run: uv run pytest
+      - run: uv run pyinstaller packaging/health_tools_ui.spec --noconfirm
+      - run: New-Item -ItemType Directory -Force dist/HealthToolsUI/offline
+      - run: Compress-Archive -Path dist/HealthToolsUI/* -DestinationPath dist/HealthToolsUI-portable.zip
+      - uses: crazy-max/ghaction-chocolatey@v3
+        with:
+          args: install innosetup --yes --no-progress
+      - run: iscc packaging/installer.iss
+      - shell: pwsh
+        run: |
+          Get-FileHash dist/HealthToolsUI-portable.zip, dist/HealthToolsUI-Setup.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content dist/SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/HealthToolsUI-portable.zip
+            dist/HealthToolsUI-Setup.exe
+            dist/SHA256SUMS.txt
+            THIRD_PARTY_NOTICES.md
