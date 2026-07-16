@@ -6,6 +6,8 @@
 htmlcov/
 build/
 dist/
+build-*/
+dist-*/
 *.spec.bak
 *.py[cod]
 __pycache__/

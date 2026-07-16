@@ -19,6 +19,7 @@ a = Analysis(
     datas=pyhuskarui_data + health_data + [
         (str(root / "src" / "health_tools_ui" / "qml"), "health_tools_ui/qml"),
         (str(root / "src" / "health_tools_ui" / "i18n"), "health_tools_ui/i18n"),
+        (str(root / "src" / "health_tools_ui" / "assets"), "health_tools_ui/assets"),
         (str(root / "THIRD_PARTY_NOTICES.md"), "."),
     ],
     hiddenimports=pyhuskarui_hidden + health_hidden,
@@ -31,6 +32,6 @@ exe = EXE(
     exclude_binaries=True,
     name="HealthToolsUI",
     console=False,
-    icon=None,
+    icon=str(root / "src" / "health_tools_ui" / "assets" / "app-icon.ico"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="HealthToolsUI")

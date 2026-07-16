@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from .models import ValidationIssue
+from .rule_schema import RuleSchemaRegistry
 
 RULE_KINDS = ("chip", "parse", "classify", "convert", "evaluate", "config")
 
@@ -62,6 +63,7 @@ class RuleDocument:
     data: CommentedMap
     original_source: str
     dirty: bool = False
+    source_buffer: str | None = None
 
     @classmethod
     def from_source(
@@ -81,18 +83,48 @@ class RuleDocument:
         _yaml().dump(self.data, stream)
         return stream.getvalue()
 
+    def editor_source(self) -> str:
+        return self.source_buffer if self.source_buffer is not None else self.source()
+
+    @property
+    def variant(self) -> str:
+        if self.kind == "classify" and "patterns" in self.data:
+            main_keys = {"structure", "classify", "rules", "extract"}
+            if not (main_keys & set(self.data)):
+                return "patterns"
+        return self.kind
+
     def replace_source(self, source: str) -> list[ValidationIssue]:
+        if source == self.editor_source():
+            return []
         try:
             replacement = RuleDocument.from_source(source, self.path, self.kind)
         except Exception as exc:
+            self.source_buffer = source
+            self.dirty = True
             return [ValidationIssue("$", "error", "YAML 语法错误", "Invalid YAML syntax", str(exc))]
         self.data = replacement.data
+        self.source_buffer = None
         self.dirty = True
         return self.validate()
 
     def validate(self) -> list[ValidationIssue]:
+        if self.source_buffer is not None:
+            try:
+                RuleDocument.from_source(self.source_buffer, self.path, self.kind)
+            except Exception as exc:
+                return [
+                    ValidationIssue(
+                        "$", "error", "YAML 语法错误", "Invalid YAML syntax", str(exc)
+                    )
+                ]
         issues: list[ValidationIssue] = []
-        for key in REQUIRED_KEYS.get(self.kind, ()):
+        required_keys = REQUIRED_KEYS.get(self.kind, ())
+        if self.kind == "parse" and isinstance(self.data.get("patterns"), dict):
+            required_keys = ("version", "patterns")
+        if self.variant == "patterns":
+            required_keys = ("version", "patterns")
+        for key in required_keys:
             if key not in self.data:
                 issues.append(
                     ValidationIssue(
@@ -102,6 +134,7 @@ class RuleDocument:
                         f"Missing required field: {key}",
                     )
                 )
+        issues.extend(_validate_schema_types(self.kind, self.variant, self.data))
         if self.kind == "convert":
             has_mapping = isinstance(self.data.get("column_mapping"), dict)
             has_pairs = "source_columns" in self.data and "target_columns" in self.data
@@ -119,6 +152,10 @@ class RuleDocument:
 
     def _upstream_validation(self) -> list[ValidationIssue]:
         if self.kind not in {"chip", "parse", "classify", "convert"}:
+            return []
+        if self.variant == "patterns" or (
+            self.kind == "parse" and isinstance(self.data.get("patterns"), dict)
+        ):
             return []
         try:
             from health_tools.rules.validator import RuleValidator
@@ -160,14 +197,112 @@ class RuleDocument:
         walk(self.data, [], 0)
         return entries
 
-    def set_value(self, pointer: str, value_source: str) -> None:
+    def tree_nodes(self) -> list[dict[str, Any]]:
+        def nodes(value: Any, path: list[str]) -> list[dict[str, Any]]:
+            items = (
+                value.items()
+                if isinstance(value, dict)
+                else enumerate(value)
+                if isinstance(value, list)
+                else []
+            )
+            result: list[dict[str, Any]] = []
+            for key, child in items:
+                child_path = [*path, str(key)]
+                entry = _entry(child_path, key, child, len(path))
+                node = {
+                    **entry,
+                    "title": f"{entry['key']}: {entry['value']}",
+                    "key": entry["pointer"],
+                }
+                if isinstance(child, (dict, list)):
+                    node["children"] = nodes(child, child_path)
+                result.append(node)
+            return result
+
+        return nodes(self.data, [])
+
+    def node(self, pointer: str) -> dict[str, Any]:
+        if not pointer:
+            return {
+                "pointer": "",
+                "key": "$",
+                "value": "root",
+                "kind": "mapping",
+                "editable": False,
+            }
+        parent, token = self._resolve_parent(pointer)
+        value = parent[int(token)] if isinstance(parent, list) else parent[token]
+        return _entry(_tokens(pointer), token, value, len(_tokens(pointer)) - 1)
+
+    def available_keys(self, pointer: str) -> list[dict[str, Any]]:
+        target = self._resolve(pointer) if pointer else self.data
+        if not isinstance(target, dict):
+            return []
+        schemas = RuleSchemaRegistry.available_children(
+            self.kind, pointer, set(str(key) for key in target), self.variant
+        )
+        return [schema.to_choice() for schema in schemas]
+
+    def add_suggested(self, pointer: str, key: str) -> None:
+        candidates = {
+            item.key: item
+            for item in RuleSchemaRegistry.available_children(
+                self.kind,
+                pointer,
+                set((self._resolve(pointer) if pointer else self.data).keys()),
+                self.variant,
+            )
+        }
+        if key not in candidates:
+            raise ValueError(f"当前位置不支持字段: {key}")
+        self.add_child(pointer, key, _dump_value(candidates[key].default))
+
+    def add_list_item(self, pointer: str) -> None:
+        target = self._resolve(pointer)
+        if not isinstance(target, list):
+            raise ValueError("只能向列表添加项目")
+        schema = RuleSchemaRegistry.schema_at(self.kind, pointer, self.variant)
+        template = schema.item_template if schema is not None else ""
+        target.append(template if not isinstance(template, (dict, list)) else _clone(template))
+        self.dirty = True
+
+    def move_list_item(self, pointer: str, offset: int) -> None:
+        parent, token = self._resolve_parent(pointer)
+        if not isinstance(parent, list):
+            raise ValueError("只能调整列表项目顺序")
+        index = int(token)
+        destination = index + offset
+        if destination < 0 or destination >= len(parent):
+            return
+        parent[index], parent[destination] = parent[destination], parent[index]
+        self.dirty = True
+
+    def apply_inferred_columns(self, columns: list[str]) -> None:
+        if self.kind == "parse":
+            self.data["columns"] = CommentedSeq(columns)
+        elif self.kind == "convert":
+            existing = self.data.get("column_mapping", {})
+            existing = existing if isinstance(existing, dict) else {}
+            self.data["column_mapping"] = CommentedMap(
+                (column, existing.get(column, column)) for column in columns
+            )
+        else:
+            raise ValueError("CSV 列推断仅支持 parse 和 convert 规则")
+        self.dirty = True
+
+    def set_value(self, pointer: str, value_source: str) -> bool:
         parent, token = self._resolve_parent(pointer)
         value = _parse_value(value_source)
+        current = parent[int(token)] if isinstance(parent, list) else parent[token]
+        if _same_value(current, value):
+            return False
         if isinstance(parent, list):
             parent[int(token)] = value
         else:
             parent[token] = value
         self.dirty = True
+        return True
 
     def add_child(self, pointer: str, key: str, value_source: str) -> None:
         target = self._resolve(pointer) if pointer else self.data
@@ -215,7 +350,17 @@ class RuleDocument:
         self.path = destination
         self.original_source = source
         self.dirty = False
+        self.source_buffer = None
         return destination
+
+    def has_external_changes(self, target: Path | None = None) -> bool:
+        destination = target or self.path
+        if destination is None:
+            return False
+        try:
+            return destination.read_text(encoding="utf-8") != self.original_source
+        except OSError:
+            return True
 
     def _resolve(self, pointer: str) -> Any:
         current: Any = self.data
@@ -238,6 +383,38 @@ def _parse_value(source: str) -> Any:
         return ""
     parsed = _yaml().load(source)
     return parsed
+
+
+def _same_value(left: Any, right: Any) -> bool:
+    return _value_kind(left) == _value_kind(right) and left == right
+
+
+def _value_kind(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "text"
+    if isinstance(value, dict):
+        return "mapping"
+    if isinstance(value, list):
+        return "list"
+    return type(value).__name__
+
+
+def _dump_value(value: Any) -> str:
+    stream = io.StringIO()
+    _yaml().dump(value, stream)
+    return stream.getvalue().strip() or "null"
+
+
+def _clone(value: Any) -> Any:
+    return _parse_value(_dump_value(value))
 
 
 def _tokens(pointer: str) -> list[str]:
@@ -273,6 +450,12 @@ def _entry(path: list[str], key: Any, value: Any, depth: int) -> dict[str, Any]:
         "kind": kind,
         "depth": depth,
         "editable": kind == "scalar",
+        "rawValue": value if kind == "scalar" else None,
+        "valueType": "boolean"
+        if isinstance(value, bool)
+        else "number"
+        if isinstance(value, (int, float))
+        else "text",
     }
 
 
@@ -285,3 +468,33 @@ def _deduplicate_issues(issues: list[ValidationIssue]) -> list[ValidationIssue]:
             result.append(issue)
             seen.add(key)
     return result
+
+
+def _validate_schema_types(kind: str, variant: str, data: Any) -> list[ValidationIssue]:
+    expected_types: dict[str, type[Any] | tuple[type[Any], ...]] = {
+        "mapping": dict,
+        "list": list,
+        "integer": int,
+        "number": (int, float),
+        "boolean": bool,
+        "text": str,
+        "regex": str,
+        "choice": str,
+        "path": str,
+    }
+    issues: list[ValidationIssue] = []
+    for schema in RuleSchemaRegistry.fields(kind, variant):
+        if schema.key not in data:
+            continue
+        expected = expected_types.get(schema.kind)
+        value = data[schema.key]
+        if expected is not None and not isinstance(value, expected):
+            issues.append(
+                ValidationIssue(
+                    schema.key,
+                    "error",
+                    f"字段 {schema.key} 类型应为 {schema.kind}",
+                    f"Field {schema.key} must be {schema.kind}",
+                )
+            )
+    return issues

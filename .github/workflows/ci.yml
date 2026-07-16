@@ -14,9 +14,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.12"
           enable-cache: true
       - run: uv sync --locked --group dev
+      - run: uv run python -c "import sys; from PySide6.QtCore import qVersion; assert 'conda' not in sys.version.lower(); assert qVersion() == '6.10.1'"
       - run: uv run ruff check .
       - run: uv run pytest --cov=health_tools_ui --cov-report=term-missing
       - run: uv run python scripts/qml_smoke.py

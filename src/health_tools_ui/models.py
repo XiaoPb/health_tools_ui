@@ -48,6 +48,9 @@ class FieldSpec:
     advanced: bool = False
     path_mode: str = "file"
     dangerous_values: tuple[Any, ...] = ()
+    choice_provider: str = ""
+    allow_browse: bool = False
+    visible_when: tuple[tuple[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)

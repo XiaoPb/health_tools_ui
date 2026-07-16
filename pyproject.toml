@@ -15,7 +15,7 @@ dependencies = [
     "platformdirs>=4.2,<5",
     "psutil>=6,<8",
     "pyhuskarui==0.6.1.0",
-    "pyside6>=6.8.3,<6.10",
+    "pyside6==6.10.1",
     "ruamel-yaml>=0.18.6,<0.19",
 ]
 
@@ -38,6 +38,7 @@ packages = ["src/health_tools_ui"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/health_tools_ui/qml" = "health_tools_ui/qml"
 "src/health_tools_ui/i18n" = "health_tools_ui/i18n"
+"src/health_tools_ui/assets" = "health_tools_ui/assets"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -49,7 +50,7 @@ source = ["health_tools_ui"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = [".agents/skills"]
+extend-exclude = [".agents/skills", "build-*", "dist-*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

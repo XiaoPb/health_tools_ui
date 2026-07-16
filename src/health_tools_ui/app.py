@@ -5,10 +5,13 @@ from pathlib import Path
 
 from pyhuskarui.husapp import HusApp
 from PySide6.QtCore import QSettings, Qt, QUrl
+from PySide6.QtGui import QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
 from . import __version__
+from .config_service import HealthConfigService
+from .resources import RuleCatalogService
 from .viewmodels import AppViewModel, RuleViewModel
 
 
@@ -20,6 +23,9 @@ def run_app(argv: list[str] | None = None) -> int:
     QApplication.setApplicationVersion(__version__)
 
     app = QApplication(argv or sys.argv)
+    icon_path = Path(__file__).parent / "assets" / "app-icon.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     engine = QQmlApplicationEngine()
     engine.warnings.connect(
         lambda warnings: [print(warning.toString(), file=sys.stderr) for warning in warnings]
@@ -27,8 +33,11 @@ def run_app(argv: list[str] | None = None) -> int:
     HusApp.initialize(engine)
 
     settings = QSettings()
-    app_model = AppViewModel(settings, engine)
-    rule_model = RuleViewModel(engine)
+    config_service = HealthConfigService()
+    config_service.initialize_and_sync()
+    rule_catalog = RuleCatalogService(engine)
+    app_model = AppViewModel(settings, engine, rule_catalog)
+    rule_model = RuleViewModel(engine, rule_catalog, config_service)
     engine.rootContext().setContextProperty("appModel", app_model)
     engine.rootContext().setContextProperty("ruleModel", rule_model)
 

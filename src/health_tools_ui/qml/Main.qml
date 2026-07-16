@@ -67,6 +67,9 @@ HusWindow {
             const model = window.menuModel();
             for (let index = 0; index < model.length; index++) mainMenu.append(model[index]);
         }
+        function onCurrentCommandChanged() {
+            mainMenu.gotoMenu("cmd:" + appModel.currentCommand.name);
+        }
     }
 
     Rectangle {
@@ -142,8 +145,8 @@ HusWindow {
                             Layout.fillWidth: true
                             text: "Config · " + (appModel.locale === "zh_CN" ? "全局配置" : "Global config")
                             onClicked: {
-                                appModel.selectCommand("config");
-                                window.currentPage = "command";
+                                ruleModel.requestOpenConfig();
+                                window.currentPage = "rules";
                             }
                         }
                         HusButton {

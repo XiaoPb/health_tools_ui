@@ -19,7 +19,7 @@ Item {
         RowLayout {
             HusText { Layout.preferredWidth: 180; text: appModel.locale === "zh_CN" ? "界面语言" : "Language" }
             HusSelect {
-                width: 240
+                width: 280
                 model: [
                     { label: "简体中文", value: "zh_CN" },
                     { label: "English", value: "en" }
@@ -58,7 +58,7 @@ Item {
         RowLayout {
             HusText { Layout.preferredWidth: 180; text: appModel.locale === "zh_CN" ? "日志级别" : "Log level" }
             HusSelect {
-                width: 240
+                width: 280
                 model: [
                     { label: "Debug", value: "debug" },
                     { label: "Info", value: "info" },

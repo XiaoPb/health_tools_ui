@@ -18,6 +18,8 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=900)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--page", choices=("command", "rules", "settings"), default="command")
+    parser.add_argument("--command", default="parse")
+    parser.add_argument("--rule-kind", default="config")
     parser.add_argument("--locale", choices=("zh_CN", "en"), default="zh_CN")
     parser.add_argument("--dark", action="store_true")
     args = parser.parse_args()
@@ -39,14 +41,18 @@ def main() -> int:
     if not engine.rootObjects():
         return 1
     window = engine.rootObjects()[0]
+    app_model.selectCommand(args.command)
+    if args.rule_kind == "config":
+        rule_model.openConfig()
+    else:
+        rule_model.newDocument(args.rule_kind)
     window.setWidth(args.width)
     window.setHeight(args.height)
     window.setProperty("currentPage", args.page)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     def capture() -> None:
-        screen = app.primaryScreen()
-        image = screen.grabWindow(int(window.winId())).toImage()
+        image = window.grabWindow()
         if image.isNull() or not image.save(str(args.output)):
             app.exit(2)
             return

@@ -53,6 +53,51 @@ Item {
                 width: root.width - 46
                 spacing: 8
 
+                Rectangle {
+                    visible: appModel.currentCommand.name === "offline"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: visible ? offlineColumn.implicitHeight + 24 : 0
+                    radius: 6
+                    color: HusTheme.Primary.colorBgLayout
+                    border.color: HusTheme.Primary.colorBorder
+
+                    ColumnLayout {
+                        id: offlineColumn
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        HusText {
+                            text: appModel.locale === "zh_CN" ? "算法版本" : "Algorithm versions"
+                            font.weight: Font.DemiBold
+                        }
+                        HusSegmented {
+                            Layout.minimumWidth: 320
+                            options: [
+                                { label: appModel.locale === "zh_CN" ? "默认版本" : "Default", value: "default" },
+                                { label: appModel.locale === "zh_CN" ? "指定版本" : "Selected", value: "selected" },
+                                { label: appModel.locale === "zh_CN" ? "全部版本" : "All", value: "all" }
+                            ]
+                            currentIndex: ["default", "selected", "all"].indexOf(appModel.offlineVersionMode)
+                            onCurrentIndexChanged: {
+                                if (currentIndex >= 0) appModel.setOfflineVersionMode(currentValue);
+                            }
+                        }
+                        HusMultiSelect {
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 360
+                            visible: appModel.offlineVersionMode === "selected"
+                            enabled: appModel.offlineVersionChoices.length > 0
+                            options: appModel.offlineVersionChoices
+                            textRole: "label"
+                            valueRole: "value"
+                            defaultSelectedKeys: appModel.offlineSelectedVersions
+                            placeholderText: appModel.locale === "zh_CN" ? "选择一个或多个版本" : "Select one or more versions"
+                            function syncVersions() { appModel.setOfflineVersions(selectedKeys); }
+                            onSelect: Qt.callLater(syncVersions)
+                            onDeselect: Qt.callLater(syncVersions)
+                        }
+                    }
+                }
+
                 Repeater {
                     model: appModel.currentFields
                     delegate: FieldEditor {

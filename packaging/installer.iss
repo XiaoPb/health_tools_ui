@@ -17,6 +17,7 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
+SetupIconFile=..\src\health_tools_ui\assets\app-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
@@ -24,6 +25,7 @@ Source: "..\dist\HealthToolsUI\*"; DestDir: "{app}"; Flags: ignoreversion recurs
 
 [Dirs]
 Name: "{app}\offline"
+Name: "{app}\config"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -34,4 +36,3 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
-

@@ -36,6 +36,8 @@ Item {
             Layout.fillWidth: true
             sourceComponent: root.field.kind === "boolean" ? booleanEditor
                            : root.field.kind === "choice" ? choiceEditor
+                           : root.field.kind === "multi_choice" ? multiChoiceEditor
+                           : root.field.kind === "integer" || root.field.kind === "number" ? numberEditor
                            : root.field.kind === "path" ? pathEditor
                            : textEditor
         }
@@ -72,20 +74,82 @@ Item {
 
     Component {
         id: choiceEditor
-        HusSelect {
+        RowLayout {
+            width: editorLoader.width
+            HusSelect {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 280
+                model: root.field.choices
+                textRole: "label"
+                valueRole: "value"
+                showToolTip: true
+                currentIndex: {
+                    appModel.valuesRevision;
+                    const current = appModel.valuesForUi[root.field.name];
+                    for (let index = 0; index < root.field.choices.length; index++) {
+                        if (root.field.choices[index].value === current) return index;
+                    }
+                    return -1;
+                }
+                onActivated: appModel.setValue(root.field.name, currentValue)
+            }
+            HusIconButton {
+                visible: Boolean(root.field.allow_browse)
+                iconSource: HusIcon.FolderOpenOutlined
+                contentDescription: appModel.locale === "zh_CN" ? "浏览其他 YAML" : "Browse another YAML"
+                onClicked: appModel.browseDynamicField(root.field.name)
+            }
+        }
+    }
+
+    Component {
+        id: multiChoiceEditor
+        RowLayout {
+            width: editorLoader.width
+            HusMultiSelect {
+                id: multiSelect
+                Layout.fillWidth: true
+                Layout.minimumWidth: 280
+                options: root.field.choices
+                textRole: "label"
+                valueRole: "value"
+                defaultSelectedKeys: {
+                    appModel.valuesRevision;
+                    const value = appModel.valuesForUi[root.field.name];
+                    return Array.isArray(value) ? value : [];
+                }
+                function syncValue() { appModel.setValue(root.field.name, selectedKeys); }
+                onSelect: Qt.callLater(syncValue)
+                onDeselect: Qt.callLater(syncValue)
+            }
+            HusIconButton {
+                visible: Boolean(root.field.allow_browse)
+                iconSource: HusIcon.FolderOpenOutlined
+                contentDescription: appModel.locale === "zh_CN" ? "浏览其他 YAML" : "Browse another YAML"
+                onClicked: appModel.browseDynamicField(root.field.name)
+            }
+        }
+    }
+
+    Component {
+        id: numberEditor
+        HusInputNumber {
             width: Math.min(editorLoader.width, 460)
-            model: root.field.choices
-            textRole: "label"
-            valueRole: "value"
-            currentIndex: {
+            precision: root.field.kind === "integer" ? 0 : 4
+            value: {
                 appModel.valuesRevision;
                 const current = appModel.valuesForUi[root.field.name];
-                for (let index = 0; index < root.field.choices.length; index++) {
-                    if (root.field.choices[index].value === current) return index;
-                }
-                return -1;
+                const numeric = Number(current);
+                return current === "" || current === null || current === undefined
+                       || !Number.isFinite(numeric) ? 0 : numeric;
             }
-            onActivated: appModel.setValue(root.field.name, currentValue)
+            onValueModified: {
+                if (Number.isFinite(value)) {
+                    appModel.setNumericValue(root.field.name, value);
+                } else {
+                    appModel.refreshValues();
+                }
+            }
         }
     }
 
@@ -105,11 +169,13 @@ Item {
                 onEditingFinished: appModel.setValue(root.field.name, text)
             }
             HusIconButton {
+                visible: root.field.path_mode !== "directory"
                 iconSource: HusIcon.FileOutlined
                 contentDescription: appModel.locale === "zh_CN" ? "选择文件" : "Select file"
                 onClicked: appModel.chooseFile(root.field.name, root.field.path_mode === "save")
             }
             HusIconButton {
+                visible: root.field.path_mode === "directory" || root.field.path_mode === "any"
                 iconSource: HusIcon.FolderOpenOutlined
                 contentDescription: appModel.locale === "zh_CN" ? "选择目录" : "Select directory"
                 onClicked: appModel.chooseDirectory(root.field.name)

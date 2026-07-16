@@ -67,6 +67,30 @@ PATH_MODES: dict[str, str] = {
     "sort_output": "directory",
 }
 
+COMMAND_PATH_MODES: dict[tuple[str, str], str] = {
+    ("parse", "output_path"): "save",
+    ("plot", "output_path"): "directory",
+    ("classify", "output_path"): "directory",
+    ("convert", "output_path"): "directory",
+    ("split", "output_path"): "directory",
+    ("process", "output_path"): "directory",
+    ("factory", "output_path"): "directory",
+    ("evaluate", "output_path"): "directory",
+    ("offline", "input_path"): "directory",
+    ("offline", "output_path"): "directory",
+}
+
+CHOICE_PROVIDERS: dict[tuple[str, str], str] = {
+    ("parse", "rule_file"): "parse",
+    ("classify", "rule_file"): "classify",
+    ("classify", "extend_files"): "classify_patterns",
+    ("convert", "rule_file"): "convert",
+    ("plot", "rule_file"): "convert",
+    ("factory", "rule_file"): "convert",
+    ("evaluate", "rule_file"): "evaluate",
+    ("validate", "rule_file"): "all_rules",
+}
+
 DANGEROUS: dict[str, tuple[Any, ...]] = {
     "mode": ("move",),
     "sort_report": (True,),
@@ -125,9 +149,22 @@ def _field_from_param(command_name: str, param: click.Parameter) -> FieldSpec:
         choices=choices,
         multiple=getattr(param, "multiple", False),
         advanced=(param.name or "") not in PRIMARY_FIELDS[command_name],
-        path_mode=PATH_MODES.get(param.name or "", "file"),
+        path_mode=COMMAND_PATH_MODES.get(
+            (command_name, param.name or ""), PATH_MODES.get(param.name or "", "file")
+        ),
         dangerous_values=DANGEROUS.get(param.name or "", ()),
+        choice_provider=_choice_provider(command_name, param.name or ""),
+        allow_browse=(command_name, param.name or "") in CHOICE_PROVIDERS,
     )
+
+
+def _choice_provider(command_name: str, field_name: str) -> str:
+    explicit = CHOICE_PROVIDERS.get((command_name, field_name))
+    if explicit:
+        return explicit
+    if field_name in {"chip", "chip_name"}:
+        return "offline_chips" if command_name == "offline" else "chip"
+    return ""
 
 
 def _merge_flag_value_fields(
