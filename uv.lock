@@ -126,7 +126,7 @@ wheels = [
 
 [[package]]
 name = "ghealth-tools"
-version = "0.4.49"
+version = "0.4.53"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "chardet" },
@@ -138,14 +138,14 @@ dependencies = [
     { name = "rich" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c7/50/9872066eb6ecf45bfe3bc58d19e30a1c3142fad0be9a74228a91d554f8ed/ghealth_tools-0.4.49.tar.gz", hash = "sha256:3be03179167ae4dd537f014e72d293358bbcefa0ccad1ece799da08d2f8acb16", size = 176370, upload-time = "2026-07-10T09:38:31.214Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/63/643e652db128484a58807f67068b09b630f7f9f2fcb9995917af9b002ce3/ghealth_tools-0.4.53.tar.gz", hash = "sha256:e699b17c4167a411ea404bf4754669437f4715ec321e9521afb0a0699b1f1b38", size = 204115, upload-time = "2026-07-16T11:35:04.322Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/db/f770364aab15fc8240177704a598280855dab536a6029e23cf3beb6a475a/ghealth_tools-0.4.49-py3-none-any.whl", hash = "sha256:1ff79bdc7772d4031f57e2bcbcee8a44d302028b0c0ad59e7b0b8b6eb5dd7e3c", size = 151644, upload-time = "2026-07-10T09:38:29.801Z" },
+    { url = "https://files.pythonhosted.org/packages/64/17/5f4ea4aa5e10426db94e670e10aaaaeed767f0b97d4a3fc22c9891eb9f11/ghealth_tools-0.4.53-py3-none-any.whl", hash = "sha256:09b848451909c6e1fe6e7345a6db5a79c528d6b5327a1650ba041e3b30df8d2c", size = 157263, upload-time = "2026-07-16T11:35:03.026Z" },
 ]
 
 [[package]]
 name = "health-tools-ui"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "ghealth-tools" },
@@ -168,7 +168,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ghealth-tools", specifier = "==0.4.49" },
+    { name = "ghealth-tools", specifier = "==0.4.53" },
     { name = "platformdirs", specifier = ">=4.2,<5" },
     { name = "psutil", specifier = ">=6,<8" },
     { name = "pyhuskarui", specifier = "==0.6.1.0" },

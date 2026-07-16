@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 from health_tools.cli import main as health_main
 
-from health_tools_ui.catalog import COMMAND_ORDER, build_catalog
+from health_tools_ui.catalog import COMMAND_ORDER, build_catalog, catalog_by_name
 
 
 def test_catalog_contains_every_business_command() -> None:
@@ -55,3 +55,15 @@ def test_catalog_preserves_complete_click_parameter_contract() -> None:
                     }
                     actual = {choice.flag for choice in field.choices}
                     assert actual == expected
+
+
+def test_latest_offline_options_are_exposed() -> None:
+    offline = catalog_by_name()["offline"]
+    fields = {field.name: field for field in offline.fields}
+
+    assert fields["ppg_offset"].flags == ("--ppg-offset",)
+    assert fields["ppg_offset"].default == 0
+    assert fields["ppg_maps"].flags == ("--ppg-map",)
+    assert fields["ppg_maps"].multiple is True
+    assert fields["settle_timeout"].flags == ("--settle-timeout",)
+    assert fields["settle_timeout"].default == 10

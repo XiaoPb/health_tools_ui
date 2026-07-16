@@ -106,6 +106,8 @@ ZH_FIELD_LABELS = {
     "scene_en": "场景适配",
     "ch_num": "有效 PPG 通道数",
     "ref_col": "金标列索引",
+    "ppg_offset": "PPG 通道偏移",
+    "ppg_maps": "PPG 通道映射",
     "settle_timeout": "输出稳定等待时间",
 }
 

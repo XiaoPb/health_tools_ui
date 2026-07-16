@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "health-tools-ui"
-version = "0.1.0"
+version = "0.1.1"
 description = "A PyHuskarUI desktop interface for ghealth-tools"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "XiaoPb" }]
 dependencies = [
-    "ghealth-tools==0.4.49",
+    "ghealth-tools==0.4.53",
     "platformdirs>=4.2,<5",
     "psutil>=6,<8",
     "pyhuskarui==0.6.1.0",
