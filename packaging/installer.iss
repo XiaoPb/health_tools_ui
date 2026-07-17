@@ -1,9 +1,9 @@
 #define MyAppName "Health Tools UI"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.3.1"
+  #define MyAppVersion "0.3.2"
 #endif
 #ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "health-tools-ui-setup-0.3.1"
+  #define MyOutputBaseFilename "health-tools-ui-setup-0.3.2"
 #endif
 #define MyAppPublisher "XiaoPb"
 #define MyAppExeName "HealthToolsUI.exe"

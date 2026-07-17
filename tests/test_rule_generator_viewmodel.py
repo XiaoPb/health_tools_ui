@@ -50,3 +50,17 @@ def test_chip_sample_starts_with_ordered_columns_and_accepts_templates(
     assert "ALGO_RESULT{0-15}" in model.draftSource
     assert "Temperature" in model.draftSource
     model.cleanup()
+
+
+def test_repeated_sample_analysis_waits_for_thread_destruction(qtbot, tmp_path: Path) -> None:
+    path = tmp_path / "sample.csv"
+    path.write_text("TimeStamp,FRAME_ID,ACCX\n1,2,3\n", encoding="utf-8")
+    model = RuleGeneratorViewModel()
+    model.setKind("chip")
+
+    for _ in range(12):
+        model.loadSample(str(path))
+        qtbot.waitUntil(lambda: not model.busy, timeout=5_000)
+        assert model._thread is None
+
+    model.cleanup()

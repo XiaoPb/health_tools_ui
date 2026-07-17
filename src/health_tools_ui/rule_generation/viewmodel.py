@@ -335,9 +335,9 @@ class RuleGeneratorViewModel(QObject):
         worker.progress.connect(self._analysis_progress)
         worker.failed.connect(self._analysis_failed)
         worker.finished.connect(thread.quit)
-        thread.finished.connect(self._thread_finished)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        thread.destroyed.connect(self._thread_destroyed)
         self._thread = thread
         self._worker = worker
         self._cancelled = cancelled
@@ -381,7 +381,7 @@ class RuleGeneratorViewModel(QObject):
         self._set_status(message)
 
     @Slot()
-    def _thread_finished(self) -> None:
+    def _thread_destroyed(self) -> None:
         self._busy = False
         self._thread = None
         self._worker = None
@@ -622,9 +622,9 @@ class RuleGeneratorViewModel(QObject):
         worker.succeeded.connect(thread.quit)
         worker.cancelled.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(self._thread_finished)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        thread.destroyed.connect(self._thread_destroyed)
         self._thread = thread
         self._worker = worker
         self._cancelled = cancelled

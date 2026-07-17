@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-07-18
+
+- Keep QThread worker references alive until Qt completes deferred destruction, preventing
+  intermittent Windows test and release-process aborts.
+
 ## 0.3.1 - 2026-07-18
 
 - Add top-level heart-rate and SpO2 analysis workflows backed by the public `analyze` API.
