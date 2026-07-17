@@ -114,9 +114,7 @@ class RuleDocument:
                 RuleDocument.from_source(self.source_buffer, self.path, self.kind)
             except Exception as exc:
                 return [
-                    ValidationIssue(
-                        "$", "error", "YAML 语法错误", "Invalid YAML syntax", str(exc)
-                    )
+                    ValidationIssue("$", "error", "YAML 语法错误", "Invalid YAML syntax", str(exc))
                 ]
         issues: list[ValidationIssue] = []
         required_keys = REQUIRED_KEYS.get(self.kind, ())
@@ -158,13 +156,14 @@ class RuleDocument:
         ):
             return []
         try:
-            from health_tools.rules.validator import RuleValidator
+            from health_tools.api import ValidateRequest, run_validate
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 path = Path(temp_dir) / self.kind / "rule.yaml"
                 path.parent.mkdir(parents=True)
                 path.write_text(self.source(), encoding="utf-8")
-                errors = RuleValidator.validate_file(path)
+                result = run_validate(ValidateRequest(path))
+                errors = result.errors
         except Exception as exc:
             return [
                 ValidationIssue(

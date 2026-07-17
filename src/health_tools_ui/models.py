@@ -21,6 +21,7 @@ class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
+    PARTIAL = "partial"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
@@ -96,6 +97,13 @@ class JobRecord:
     finished_at: str | None = None
     exit_code: int | None = None
     log: str = ""
+    stage: str = ""
+    completed: int = 0
+    total: int | None = None
+    message: str = ""
+    result: dict[str, Any] | None = None
+    error_type: str = ""
+    error_message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -110,6 +118,14 @@ class JobRecord:
             "finishedAt": self.finished_at or "",
             "exitCode": self.exit_code if self.exit_code is not None else -1,
             "log": self.log,
+            "stage": self.stage,
+            "completed": self.completed,
+            "total": self.total if self.total is not None else -1,
+            "message": self.message,
+            "percent": round(self.completed * 100 / self.total, 1) if self.total else -1,
+            "result": self.result or {},
+            "errorType": self.error_type,
+            "errorMessage": self.error_message,
         }
 
 

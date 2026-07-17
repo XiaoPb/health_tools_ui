@@ -4,6 +4,10 @@ import sys
 
 
 def main() -> int:
+    if len(sys.argv) >= 2 and sys.argv[1] == "--offline-worker":
+        from .worker import run_offline_worker
+
+        return run_offline_worker()
     if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
         from .worker import run_worker
 

@@ -36,7 +36,7 @@ def run_app(argv: list[str] | None = None) -> int:
     config_service = HealthConfigService()
     config_service.initialize_and_sync()
     rule_catalog = RuleCatalogService(engine)
-    app_model = AppViewModel(settings, engine, rule_catalog)
+    app_model = AppViewModel(settings, engine, rule_catalog, config_service)
     rule_model = RuleViewModel(engine, rule_catalog, config_service)
     engine.rootContext().setContextProperty("appModel", app_model)
     engine.rootContext().setContextProperty("ruleModel", rule_model)

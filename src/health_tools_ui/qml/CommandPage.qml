@@ -135,6 +135,18 @@ Item {
                 anchors.margins: 8
                 RowLayout {
                     Layout.fillWidth: true
+                    HusSpin {
+                        visible: appModel.running && appModel.currentProgress.total < 0
+                        sizeHint: "small"
+                        tip: appModel.currentProgress.message || appModel.currentProgress.stage
+                    }
+                    HusProgress {
+                        visible: appModel.running && appModel.currentProgress.total >= 0
+                        Layout.fillWidth: true
+                        percent: Math.max(0, appModel.currentProgress.percent)
+                        status: HusProgress.Status_Active
+                        formatter: () => appModel.currentProgress.message || appModel.currentProgress.stage
+                    }
                     Item { Layout.fillWidth: true }
                     HusButton {
                         visible: appModel.running

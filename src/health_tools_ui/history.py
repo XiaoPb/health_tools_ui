@@ -40,6 +40,10 @@ class HistoryStore:
                 )
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
+            for name in ("result_json", "error_type", "error_message"):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE jobs ADD COLUMN {name} TEXT")
 
     def save(self, record: JobRecord) -> None:
         request = record.request
@@ -48,14 +52,19 @@ class HistoryStore:
                 """
                 INSERT INTO jobs (
                     id, command, argv_json, values_json, output_path, status,
-                    created_at, started_at, finished_at, exit_code, log
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, started_at, finished_at, exit_code, log,
+                    result_json, error_type, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     status=excluded.status,
+                    output_path=excluded.output_path,
                     started_at=excluded.started_at,
                     finished_at=excluded.finished_at,
                     exit_code=excluded.exit_code,
-                    log=excluded.log
+                    log=excluded.log,
+                    result_json=excluded.result_json,
+                    error_type=excluded.error_type,
+                    error_message=excluded.error_message
                 """,
                 (
                     request.id,
@@ -69,6 +78,9 @@ class HistoryStore:
                     record.finished_at,
                     record.exit_code,
                     record.log,
+                    json.dumps(record.result, ensure_ascii=False) if record.result else None,
+                    record.error_type or None,
+                    record.error_message or None,
                 ),
             )
 
@@ -95,6 +107,9 @@ class HistoryStore:
                     finished_at=row["finished_at"],
                     exit_code=row["exit_code"],
                     log=row["log"],
+                    result=json.loads(row["result_json"]) if row["result_json"] else None,
+                    error_type=row["error_type"] or "",
+                    error_message=row["error_message"] or "",
                 )
             )
         return records

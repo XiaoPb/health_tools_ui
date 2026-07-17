@@ -2,11 +2,35 @@ from __future__ import annotations
 
 import math
 
+from health_tools.api import ConfigAction, ConfigResult, RequestValidationError, RuleCatalogResult
 from PySide6.QtCore import QSettings
 from PySide6.QtTest import QSignalSpy
 
 from health_tools_ui.config_service import HealthConfigService
+from health_tools_ui.resources import RuleCatalogService
 from health_tools_ui.viewmodels import AppViewModel, RuleViewModel
+
+
+class FakeConfigApi:
+    def __init__(self, source: str) -> None:
+        self.source = source
+        self.revision = "r1"
+        self.replace_count = 0
+
+    def __call__(self, request):
+        if request.action == ConfigAction.REPLACE:
+            if request.expected_revision != self.revision:
+                raise RequestValidationError("配置 revision 冲突")
+            self.source = request.source
+            self.revision = f"r{int(self.revision[1:]) + 1}"
+            self.replace_count += 1
+        return ConfigResult(request.action, source=self.source, revision=self.revision)
+
+
+def config_model(source: str) -> tuple[RuleViewModel, FakeConfigApi]:
+    api = FakeConfigApi(source)
+    catalog = RuleCatalogService(list_runner=lambda _request: RuleCatalogResult())
+    return RuleViewModel(rule_catalog=catalog, config_service=HealthConfigService(api)), api
 
 
 def test_offline_version_modes_map_to_original_click_fields(qapp, tmp_path) -> None:
@@ -46,12 +70,9 @@ def test_non_finite_command_numbers_are_rejected(qapp, tmp_path) -> None:
 
 
 def test_config_reloads_from_user_file_when_opened(qapp, tmp_path) -> None:
-    user_config = tmp_path / "user" / "config.yaml"
-    user_config.parent.mkdir()
-    user_config.write_text("rules_dir: first\n", encoding="utf-8")
-    model = RuleViewModel(config_service=HealthConfigService(user_config=user_config))
-
-    user_config.write_text("rules_dir: second\n", encoding="utf-8")
+    model, api = config_model("rules_dir: first\n")
+    api.source = "rules_dir: second\n"
+    api.revision = "r2"
     model.requestOpenConfig()
 
     assert model.kind == "config"
@@ -62,43 +83,34 @@ def test_config_reloads_from_user_file_when_opened(qapp, tmp_path) -> None:
 
 
 def test_config_save_rejects_external_changes(qapp, tmp_path) -> None:
-    user_config = tmp_path / "user" / "config.yaml"
-    user_config.parent.mkdir()
-    user_config.write_text("rules_dir: original\nretries: 5\n", encoding="utf-8")
-    model = RuleViewModel(config_service=HealthConfigService(user_config=user_config))
+    model, api = config_model("rules_dir: original\nretries: 5\n")
 
     model.setVisualValue("/rules_dir", "draft")
-    user_config.write_text("rules_dir: external\nretries: 5\n", encoding="utf-8")
+    api.source = "rules_dir: external\nretries: 5\n"
+    api.revision = "r2"
     model.save()
 
-    assert user_config.read_text(encoding="utf-8").startswith("rules_dir: external")
+    assert api.source.startswith("rules_dir: external")
     assert model.dirty is True
     assert "extern" in model.status.lower() or "外部" in model.status
 
 
 def test_equal_config_edit_and_clean_save_do_not_write(qapp, tmp_path) -> None:
-    user_config = tmp_path / "user" / "config.yaml"
-    user_config.parent.mkdir()
     original = "rules_dir: original\n"
-    user_config.write_text(original, encoding="utf-8")
-    model = RuleViewModel(config_service=HealthConfigService(user_config=user_config))
+    model, api = config_model(original)
     changed = QSignalSpy(model.documentChanged)
-    modified_at = user_config.stat().st_mtime_ns
 
     model.setVisualValue("/rules_dir", "original")
     model.save()
 
     assert changed.count() == 0
     assert model.dirty is False
-    assert user_config.read_text(encoding="utf-8") == original
-    assert user_config.stat().st_mtime_ns == modified_at
+    assert api.source == original
+    assert api.replace_count == 0
 
 
 def test_non_finite_rule_number_is_rejected(qapp, tmp_path) -> None:
-    user_config = tmp_path / "user" / "config.yaml"
-    user_config.parent.mkdir()
-    user_config.write_text("rules_dir: original\nretries: 5\n", encoding="utf-8")
-    model = RuleViewModel(config_service=HealthConfigService(user_config=user_config))
+    model, _api = config_model("rules_dir: original\nretries: 5\n")
 
     for value in (math.nan, math.inf, -math.inf):
         model.setVisualNumber("/retries", value)

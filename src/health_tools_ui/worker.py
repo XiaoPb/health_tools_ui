@@ -1,37 +1,77 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-from collections.abc import Sequence
+from threading import Event, Thread
+from typing import Any, TextIO
 
-import click
-from health_tools.cli import main as health_main
+from health_tools.api import ExecutionContext, GHealthError, OperationCancelled
+
+from .api_adapter import build_request, operation_runner, serialize_result, to_jsonable
 
 
-def run_worker(payload: str | Sequence[str]) -> int:
-    argv = json.loads(payload) if isinstance(payload, str) else list(payload)
-    if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
-        print("Worker payload must be a JSON array of strings", file=sys.stderr)
+def _write(stream: TextIO, payload: dict[str, Any]) -> None:
+    stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    stream.flush()
+
+
+def run_offline_worker(stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
+    source = stdin or sys.stdin
+    target = stdout or sys.stdout
+    first = source.readline()
+    try:
+        message = json.loads(first)
+    except (json.JSONDecodeError, TypeError):
+        _write(
+            target,
+            {"type": "error", "error_type": "ProtocolError", "message": "Invalid run message"},
+        )
+        return 2
+    if not isinstance(message, dict) or message.get("type") != "run":
+        _write(
+            target,
+            {"type": "error", "error_type": "ProtocolError", "message": "Expected run message"},
+        )
         return 2
 
-    os.environ.setdefault("PYTHONUTF8", "1")
-    os.environ.setdefault("PYTHONUNBUFFERED", "1")
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+    cancelled = Event()
+
+    def read_control() -> None:
+        for line in source:
+            try:
+                control = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(control, dict) and control.get("type") == "cancel":
+                cancelled.set()
+                return
+
+    Thread(target=read_control, daemon=True).start()
+
+    def on_progress(event: Any) -> None:
+        _write(target, {"type": "progress", "event": to_jsonable(event)})
 
     try:
-        health_main.main(args=argv, prog_name="ghealth_tool", standalone_mode=False)
+        request = build_request("offline", message.get("values", {}))
+        result = operation_runner("offline")(
+            request,
+            context=ExecutionContext(on_progress=on_progress, is_cancelled=cancelled.is_set),
+        )
+        _write(target, {"type": "result", "result": serialize_result(result)})
         return 0
-    except click.ClickException as exc:
-        exc.show(file=sys.stderr)
-        return int(getattr(exc, "exit_code", 1))
-    except click.Abort as exc:
-        print("Aborted!", file=sys.stderr)
-        return int(getattr(exc, "exit_code", 1))
-    except SystemExit as exc:
-        return int(exc.code or 0)
-    except Exception as exc:
-        print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+    except OperationCancelled as exc:
+        partial = serialize_result(exc.partial_result) if exc.partial_result is not None else None
+        _write(target, {"type": "cancelled", "stage": exc.stage, "result": partial})
+        return 0
+    except GHealthError as exc:
+        _write(target, {"type": "error", "error_type": type(exc).__name__, "message": str(exc)})
         return 1
+    except Exception as exc:
+        _write(target, {"type": "error", "error_type": type(exc).__name__, "message": str(exc)})
+        return 1
+
+
+def run_worker(payload: str | list[str]) -> int:
+    del payload
+    print("Legacy CLI workers are no longer supported", file=sys.stderr)
+    return 2

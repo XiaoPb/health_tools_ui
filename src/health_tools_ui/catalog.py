@@ -1,10 +1,23 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from dataclasses import MISSING, fields
 from typing import Any
 
-import click
-from health_tools.cli import main as health_main
+from health_tools.api import (
+    CheckRequest,
+    ClassifyRequest,
+    ConfigRequest,
+    ConvertRequest,
+    EvaluateRequest,
+    FactoryRequest,
+    InfoRequest,
+    OfflineRequest,
+    ParseRequest,
+    PlotRequest,
+    ProcessRequest,
+    SplitRequest,
+    ValidateRequest,
+)
 
 from .models import CommandSpec, FieldChoice, FieldKind, FieldSpec
 
@@ -23,24 +36,37 @@ COMMAND_ORDER = (
     "offline",
     "check",
 )
-
-COMMAND_META: dict[str, tuple[str, str, str]] = {
-    "parse": ("数据处理", "日志解析 Parse", "files"),
-    "plot": ("分析评估", "数据绘图 Plot", "images"),
-    "classify": ("数据处理", "数据分类 Classify", "files"),
-    "convert": ("数据处理", "格式转换 Convert", "csv"),
-    "info": ("分析评估", "文件信息 Info", "text"),
-    "validate": ("质量与离线", "规则验证 Validate", "text"),
-    "split": ("数据处理", "数据分割 Split", "files"),
-    "process": ("数据处理", "批量处理 Process", "files"),
-    "factory": ("分析评估", "产测计算 Factory", "csv"),
-    "config": ("设置", "全局配置 Config", "text"),
-    "evaluate": ("分析评估", "指标评估 Evaluate", "csv"),
-    "offline": ("质量与离线", "离线跑库 Offline", "files"),
-    "check": ("质量与离线", "数据检查 Check", "csv"),
+REQUEST_TYPES = {
+    "parse": ParseRequest,
+    "plot": PlotRequest,
+    "classify": ClassifyRequest,
+    "convert": ConvertRequest,
+    "info": InfoRequest,
+    "validate": ValidateRequest,
+    "split": SplitRequest,
+    "process": ProcessRequest,
+    "factory": FactoryRequest,
+    "config": ConfigRequest,
+    "evaluate": EvaluateRequest,
+    "offline": OfflineRequest,
+    "check": CheckRequest,
 }
-
-PRIMARY_FIELDS: dict[str, set[str]] = {
+COMMAND_META: dict[str, tuple[str, str, str, str]] = {
+    "parse": ("数据处理", "日志解析 Parse", "files", "按规则将日志解析为 CSV"),
+    "plot": ("分析评估", "数据绘图 Plot", "images", "生成时域图与频谱图"),
+    "classify": ("数据处理", "数据分类 Classify", "files", "按规则复制、移动或链接文件"),
+    "convert": ("数据处理", "格式转换 Convert", "csv", "转换或合并 CSV 数据"),
+    "info": ("分析评估", "文件信息 Info", "text", "读取文件摘要、结构与预览"),
+    "validate": ("质量与离线", "规则验证 Validate", "text", "验证 YAML 规则"),
+    "split": ("数据处理", "数据分割 Split", "files", "按列、大小或时间分割 CSV"),
+    "process": ("数据处理", "批量处理 Process", "files", "批量处理 CSV 数据"),
+    "factory": ("分析评估", "产测计算 Factory", "csv", "计算产测指标"),
+    "config": ("设置", "全局配置 Config", "text", "读取或修改全局配置"),
+    "evaluate": ("分析评估", "指标评估 Evaluate", "csv", "生成算法指标评估报告"),
+    "offline": ("质量与离线", "离线跑库 Offline", "files", "运行离线算法并整理结果"),
+    "check": ("质量与离线", "数据检查 Check", "csv", "检查数据质量或按报告分拣"),
+}
+PRIMARY_FIELDS = {
     "parse": {"input_path", "output_path", "rule_file", "chip_name"},
     "plot": {"input_path", "output_path", "plot_type", "channels", "sample_rate"},
     "classify": {"input_path", "output_path", "rule_file", "mode"},
@@ -50,37 +76,91 @@ PRIMARY_FIELDS: dict[str, set[str]] = {
     "split": {"input_path", "output_path", "chip_name", "by_column", "by_size"},
     "process": {"input_path", "output_path", "chip_name", "frame_split", "max_workers"},
     "factory": {"input_path", "chip_name", "rule_file", "output_path"},
-    "config": {"do_init", "do_show", "rules_dir", "offline_path", "offline_default"},
+    "config": {"action", "value", "force"},
     "evaluate": {"input_path", "output_path", "eval_type", "chip", "rule_file"},
     "offline": {"input_path", "output_path", "chip_name", "ver", "versions", "do_list"},
     "check": {"input_path", "chip_name", "checks", "output_path", "sort_report"},
 }
-
-PATH_MODES: dict[str, str] = {
-    "input_path": "any",
-    "output_path": "save",
-    "rule_file": "file",
-    "target": "file",
-    "rules_dir": "directory",
-    "offline_path": "directory",
-    "report_path": "file",
-    "sort_output": "directory",
+PATH_FIELDS = {"input_path", "output_path", "rule_file", "target", "report_path", "sort_output"}
+TUPLE_FIELDS = {"extend_files", "ppg_maps"}
+INTEGER_FIELDS = {
+    "sample_rate",
+    "window",
+    "dpi",
+    "preview",
+    "by_size",
+    "max_workers",
+    "split",
+    "hba_fs",
+    "scene_en",
+    "ch_num",
+    "ref_col",
+    "ppg_offset",
+    "timeout",
+    "settle_timeout",
+    "tolerance",
+    "static_min",
+    "workers",
+    "ref_column_col",
+    "pred_column_col",
 }
-
-COMMAND_PATH_MODES: dict[tuple[str, str], str] = {
-    ("parse", "output_path"): "save",
-    ("plot", "output_path"): "directory",
-    ("classify", "output_path"): "directory",
-    ("convert", "output_path"): "directory",
-    ("split", "output_path"): "directory",
-    ("process", "output_path"): "directory",
-    ("factory", "output_path"): "directory",
-    ("evaluate", "output_path"): "directory",
-    ("offline", "input_path"): "directory",
-    ("offline", "output_path"): "directory",
+NUMBER_FIELDS = {
+    "overlap",
+    "column_value",
+    "by_time",
+    "gain",
+    "current",
+    "adc_offset",
+    "diff_threshold",
+    "stale_minutes",
+    "range_ratio",
+    "frame_ratio",
+    "center_ratio",
+    "ipd_ratio",
+    "acc_ratio",
+    "timestamp_ratio",
+    "timestamp_ms",
+    "timestamp_fail_ratio",
 }
-
-CHOICE_PROVIDERS: dict[tuple[str, str], str] = {
+BOOLEAN_FIELDS = {
+    "dry_run",
+    "remove_baseline",
+    "freq_bpm",
+    "no_show",
+    "enable_accuracy",
+    "report",
+    "merge",
+    "init_rule",
+    "stats",
+    "schema",
+    "strict",
+    "frame_split",
+    "force",
+    "all_versions",
+    "no_accuracy",
+    "no_plot",
+    "no_run",
+    "do_list",
+    "acc_axis",
+    "sort_report",
+}
+CHOICES: dict[tuple[str, str], tuple[Any, ...]] = {
+    ("plot", "plot_type"): ("both", "ac", "psd"),
+    ("plot", "fmt"): ("png", "svg", "pdf"),
+    ("plot", "baseline_method"): ("mean", "median"),
+    ("plot", "psd_acc"): ("axis", "magnitude"),
+    ("classify", "mode"): ("copy", "move", "symlink"),
+    ("evaluate", "eval_type"): ("hr", "spo2"),
+    ("config", "action"): (
+        "show",
+        "init",
+        "set_rules_dir",
+        "set_offline_path",
+        "set_offline_default",
+        "scan_offline",
+    ),
+}
+CHOICE_PROVIDERS = {
     ("parse", "rule_file"): "parse",
     ("classify", "rule_file"): "classify",
     ("classify", "extend_files"): "classify_patterns",
@@ -90,144 +170,102 @@ CHOICE_PROVIDERS: dict[tuple[str, str], str] = {
     ("evaluate", "rule_file"): "evaluate",
     ("validate", "rule_file"): "all_rules",
 }
-
-DANGEROUS: dict[str, tuple[Any, ...]] = {
-    "mode": ("move",),
-    "sort_report": (True,),
-    "do_force": (True,),
+DANGEROUS = {"mode": ("move",), "sort_report": (True,), "force": (True,)}
+FIELD_HELP = {
+    "input_path": "待处理的文件或目录",
+    "output_path": "保存结果的文件或目录",
+    "rule_file": "使用的 YAML 规则",
+    "chip_name": "数据对应的芯片型号",
+    "target": "需要读取信息的文件",
+    "action": "选择一个配置操作",
+    "value": "所选配置操作需要的值",
+    "force": "初始化时覆盖已存在的内置规则",
+    "filter_name": "仅处理文件名包含该文本的文件",
+    "do_list": "只读取可用芯片和算法版本",
 }
 
 
-def _kind_for(param: click.Parameter) -> FieldKind:
-    if (param.name or "") in PATH_MODES:
-        return FieldKind.PATH
-    if isinstance(param, click.Option) and param.is_flag:
-        return FieldKind.BOOLEAN
-    if isinstance(param.type, click.Path):
-        return FieldKind.PATH
-    if isinstance(param.type, click.Choice):
+def _default(item: Any) -> Any:
+    if item.default is not MISSING:
+        value = item.default
+    elif item.default_factory is not MISSING:
+        value = item.default_factory()
+    else:
+        return None
+    return list(value) if isinstance(value, tuple) else value
+
+
+def _kind(command: str, name: str) -> FieldKind:
+    if (command, name) in CHOICES:
         return FieldKind.CHOICE
-    if isinstance(param.type, click.types.IntParamType):
+    if name in PATH_FIELDS:
+        return FieldKind.PATH
+    if name in BOOLEAN_FIELDS:
+        return FieldKind.BOOLEAN
+    if name in INTEGER_FIELDS:
         return FieldKind.INTEGER
-    if isinstance(param.type, click.types.FloatParamType):
+    if name in NUMBER_FIELDS:
         return FieldKind.NUMBER
-    if getattr(param, "multiple", False):
+    if name in TUPLE_FIELDS:
         return FieldKind.LIST
     return FieldKind.TEXT
 
 
-def _label(name: str) -> str:
-    return name.replace("_", " ").title()
-
-
-def _safe_default(value: Any) -> Any:
-    if repr(value) == "Sentinel.UNSET":
-        return None
-    if isinstance(value, tuple):
-        return list(value)
-    return value
-
-
-def _field_from_param(command_name: str, param: click.Parameter) -> FieldSpec:
-    option = param if isinstance(param, click.Option) else None
-    choices: tuple[FieldChoice, ...] = ()
-    if isinstance(param.type, click.Choice):
-        choices = tuple(FieldChoice(str(value), value) for value in param.type.choices)
-    flags = tuple(option.opts) if option else ()
-    false_flags = tuple(option.secondary_opts) if option else ()
-    help_text = option.help or "" if option else "Positional argument"
-    return FieldSpec(
-        name=param.name or "value",
-        label=_label(param.name or "value"),
-        help=help_text,
-        kind=_kind_for(param),
-        flags=flags,
-        false_flags=false_flags,
-        positional=not isinstance(param, click.Option),
-        required=param.required,
-        default=_safe_default(param.default),
-        choices=choices,
-        multiple=getattr(param, "multiple", False),
-        advanced=(param.name or "") not in PRIMARY_FIELDS[command_name],
-        path_mode=COMMAND_PATH_MODES.get(
-            (command_name, param.name or ""), PATH_MODES.get(param.name or "", "file")
-        ),
-        dangerous_values=DANGEROUS.get(param.name or "", ()),
-        choice_provider=_choice_provider(command_name, param.name or ""),
-        allow_browse=(command_name, param.name or "") in CHOICE_PROVIDERS,
-    )
-
-
-def _choice_provider(command_name: str, field_name: str) -> str:
-    explicit = CHOICE_PROVIDERS.get((command_name, field_name))
+def _provider(command: str, name: str) -> str:
+    explicit = CHOICE_PROVIDERS.get((command, name))
     if explicit:
         return explicit
-    if field_name in {"chip", "chip_name"}:
-        return "offline_chips" if command_name == "offline" else "chip"
+    if name in {"chip", "chip_name"}:
+        return "offline_chips" if command == "offline" else "chip"
     return ""
 
 
-def _merge_flag_value_fields(
-    fields: list[FieldSpec], params: list[click.Parameter]
-) -> list[FieldSpec]:
-    grouped: dict[str, list[tuple[FieldSpec, click.Parameter]]] = defaultdict(list)
-    for field, param in zip(fields, params, strict=True):
-        grouped[field.name].append((field, param))
-
-    merged: list[FieldSpec] = []
-    for name, items in grouped.items():
-        if len(items) == 1:
-            merged.append(items[0][0])
-            continue
-        options = [param for _, param in items if isinstance(param, click.Option)]
-        if options and all(option.is_flag and option.flag_value is not None for option in options):
-            first = items[0][0]
-            default = next(
-                (field.default for field, _ in items if field.default not in (None, False)),
-                first.default,
+def build_catalog() -> tuple[CommandSpec, ...]:
+    specs: list[CommandSpec] = []
+    for command in COMMAND_ORDER:
+        request_type = REQUEST_TYPES[command]
+        request_fields = fields(request_type)
+        if command == "config":
+            request_fields = tuple(
+                item for item in request_fields if item.name in {"action", "value", "force"}
             )
+        ui_fields: list[FieldSpec] = []
+        for item in request_fields:
+            name = item.name
+            provider = _provider(command, name)
             choices = tuple(
-                FieldChoice(_label(option.opts[0].lstrip("-")), option.flag_value, option.opts[0])
-                for option in options
+                FieldChoice(str(value), value) for value in CHOICES.get((command, name), ())
             )
-            merged.append(
+            path_mode = "any" if name in {"input_path", "target"} else "file"
+            if name == "output_path":
+                path_mode = "save" if command == "parse" else "directory"
+            elif name == "sort_output":
+                path_mode = "directory"
+            default = _default(item)
+            if command == "config" and name == "action":
+                default = "show"
+            ui_fields.append(
                 FieldSpec(
                     name=name,
-                    label=_label(name),
-                    help=" / ".join(option.help or "" for option in options),
-                    kind=FieldKind.CHOICE,
+                    label=name.replace("_", " ").title(),
+                    help=FIELD_HELP.get(name, "业务参数"),
+                    kind=_kind(command, name),
+                    required=item.default is MISSING and item.default_factory is MISSING,
                     default=default,
                     choices=choices,
-                    advanced=first.advanced,
+                    multiple=name in TUPLE_FIELDS,
+                    advanced=name not in PRIMARY_FIELDS[command],
+                    path_mode=path_mode,
                     dangerous_values=DANGEROUS.get(name, ()),
+                    choice_provider=provider,
+                    allow_browse=bool(provider),
+                    visible_when=(("action", "init"),)
+                    if command == "config" and name == "force"
+                    else (),
                 )
             )
-        else:
-            merged.extend(field for field, _ in items)
-    return merged
-
-
-def build_catalog() -> tuple[CommandSpec, ...]:
-    context = click.Context(health_main)
-    specs: list[CommandSpec] = []
-    for name in COMMAND_ORDER:
-        command = health_main.get_command(context, name)
-        if command is None:
-            raise RuntimeError(f"ghealth-tools command is unavailable: {name}")
-        params = list(command.params)
-        fields = [_field_from_param(name, param) for param in params]
-        fields = _merge_flag_value_fields(fields, params)
-        group, title, result_type = COMMAND_META[name]
-        specs.append(
-            CommandSpec(
-                name=name,
-                title=title,
-                group=group,
-                help=command.help or command.short_help or "",
-                result_type=result_type,
-                fields=tuple(fields),
-            )
-        )
+        group, title, result_type, help_text = COMMAND_META[command]
+        specs.append(CommandSpec(command, title, group, help_text, result_type, tuple(ui_fields)))
     return tuple(specs)
 
 

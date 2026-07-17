@@ -40,7 +40,7 @@ HusDrawer {
                 delegate: Rectangle {
                     required property var modelData
                     width: ListView.view.width
-                    height: 112
+                    height: modelData.status === "running" ? 138 : 112
                     radius: 6
                     color: HusTheme.Primary.colorBgLayout
                     border.color: HusTheme.Primary.colorBorder
@@ -55,7 +55,8 @@ HusDrawer {
                                 text: modelData.status.toUpperCase()
                                 presetColor: modelData.status === "succeeded" ? "green"
                                            : modelData.status === "failed" ? "red"
-                                           : modelData.status === "running" ? "blue" : "default"
+                                           : modelData.status === "running" ? "blue"
+                                           : modelData.status === "partial" ? "orange" : "default"
                             }
                             Item { Layout.fillWidth: true }
                             HusText {
@@ -66,9 +67,16 @@ HusDrawer {
                         }
                         HusText {
                             Layout.fillWidth: true
-                            text: modelData.outputPath || modelData.argv.join(" ")
+                            text: modelData.outputPath || modelData.command
                             color: HusTheme.Primary.colorTextSecondary
                             elide: Text.ElideMiddle
+                        }
+                        HusProgress {
+                            Layout.fillWidth: true
+                            visible: modelData.status === "running" && modelData.total >= 0
+                            percent: Math.max(0, modelData.percent)
+                            status: HusProgress.Status_Active
+                            formatter: () => modelData.message || modelData.stage
                         }
                         RowLayout {
                             Item { Layout.fillWidth: true }

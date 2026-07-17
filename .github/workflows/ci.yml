@@ -17,13 +17,14 @@ jobs:
           python-version: "3.12.12"
           enable-cache: true
       - run: uv sync --locked --group dev
-      - run: uv run python -c "import importlib.metadata as m, sys; from PySide6.QtCore import qVersion; assert 'conda' not in sys.version.lower(); assert qVersion() == '6.10.1'; assert m.version('ghealth-tools') == '0.4.53'"
+      - run: uv run python -c "import importlib.metadata as m, sys; from PySide6.QtCore import qVersion; assert 'conda' not in sys.version.lower(); assert qVersion() == '6.10.1'; assert m.version('ghealth-tools') == '0.4.56'"
       - run: uv run ruff check .
       - run: uv run pytest --cov=health_tools_ui --cov-report=term-missing
       - run: uv run python scripts/qml_smoke.py
       - run: uv run pyinstaller packaging/health_tools_ui.spec --noconfirm
       - run: New-Item -ItemType Directory -Force dist/HealthToolsUI/offline
-      - run: dist/HealthToolsUI/HealthToolsUI.exe --worker "[`"--help`"]"
+      - shell: pwsh
+        run: "'{\"type\":\"run\",\"values\":{\"do_list\":true}}' | dist/HealthToolsUI/HealthToolsUI.exe --offline-worker"
       - uses: actions/upload-artifact@v4
         with:
           name: HealthToolsUI-windows-portable

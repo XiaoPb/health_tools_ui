@@ -5,11 +5,19 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from health_tools.api import (
+    RuleReadRequest,
+    RuleSaveRequest,
+    RuleSource,
+    RuleType,
+    run_read_rule,
+    run_save_rule,
+)
 from PySide6.QtCore import Property, QObject, QSettings, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog
 
-from .arguments import build_argv, is_dangerous, validate_values
+from .arguments import is_dangerous, validate_values
 from .catalog import build_catalog
 from .config_service import HealthConfigService
 from .csv_inference import infer_csv_columns
@@ -109,6 +117,9 @@ ZH_FIELD_LABELS = {
     "ppg_offset": "PPG 通道偏移",
     "ppg_maps": "PPG 通道映射",
     "settle_timeout": "输出稳定等待时间",
+    "action": "配置操作",
+    "value": "配置值",
+    "force": "强制覆盖",
 }
 
 
@@ -128,6 +139,7 @@ class AppViewModel(QObject):
         settings: QSettings,
         parent: QObject | None = None,
         rule_catalog: RuleCatalogService | None = None,
+        config_service: HealthConfigService | None = None,
     ) -> None:
         super().__init__(parent)
         self.settings = settings
@@ -143,6 +155,7 @@ class AppViewModel(QObject):
         self._result: dict[str, Any] = {"kind": "none", "title": "", "items": []}
         self._selected_log = ""
         self.rule_catalog = rule_catalog or RuleCatalogService(self)
+        self.config_service = config_service or HealthConfigService()
         self.offline_catalog = OfflineCatalogService()
         self._offline_mode = "default"
         self._offline_selected_versions: list[str] = []
@@ -169,6 +182,16 @@ class AppViewModel(QObject):
     def currentFields(self) -> list[dict[str, Any]]:
         fields: list[dict[str, Any]] = []
         for field in self._current.fields:
+            if self._current.name == "config":
+                action = str(self._values.get("action") or "show")
+                if field.name == "force" and action != "init":
+                    continue
+                if field.name == "value" and action not in {
+                    "set_rules_dir",
+                    "set_offline_path",
+                    "set_offline_default",
+                }:
+                    continue
             if self._current.name == "offline" and field.name in {
                 "ver",
                 "versions",
@@ -248,6 +271,12 @@ class AppViewModel(QObject):
     def running(self) -> bool:
         return self.queue.current is not None
 
+    @Property(dict, notify=jobsChanged)
+    def currentProgress(self) -> dict[str, Any]:
+        if self.queue.current is None:
+            return {"stage": "", "completed": 0, "total": -1, "percent": -1, "message": ""}
+        return self.queue.current.to_dict()
+
     @Property(str, notify=localeChanged)
     def locale(self) -> str:
         return self._locale
@@ -267,10 +296,6 @@ class AppViewModel(QObject):
     @Property(bool, notify=settingsChanged)
     def darkMode(self) -> bool:
         return self._dark_mode
-
-    @Property(str, notify=settingsChanged)
-    def logLevel(self) -> str:
-        return str(self.settings.value("logLevel", "info"))
 
     @Property(str, notify=settingsChanged)
     def offlinePath(self) -> str:
@@ -308,6 +333,8 @@ class AppViewModel(QObject):
     @Slot(str, object)
     def setValue(self, name: str, value: Any) -> None:
         self._values[name] = value
+        if self._current.name == "config" and name == "action":
+            self.currentCommandChanged.emit()
         if self._current.name == "offline" and name in {"chip_name", "no_run"}:
             available = {item["value"] for item in self._offline_version_choices()}
             self._offline_selected_versions = [
@@ -387,13 +414,6 @@ class AppViewModel(QObject):
         self.settings.setValue("darkMode", enabled)
         self.settingsChanged.emit()
 
-    @Slot(str)
-    def setLogLevel(self, level: str) -> None:
-        if level not in {"debug", "info", "warning", "error"}:
-            return
-        self.settings.setValue("logLevel", level)
-        self.settingsChanged.emit()
-
     @Slot()
     def chooseOfflinePath(self) -> None:
         path = QFileDialog.getExistingDirectory(None, "Select offline tools directory")
@@ -407,18 +427,8 @@ class AppViewModel(QObject):
             self._set_status(f"Offline directory does not exist: {path}")
             return False
         try:
-            from health_tools.config import load_config
-            from health_tools.core.offline import (
-                merge_scanned_versions,
-                save_offline_config,
-                scan_versions,
-            )
-
-            config = load_config()
-            versions = merge_scanned_versions(
-                scan_versions(target), config.get("offline_versions", {})
-            )
-            save_offline_config(target, versions)
+            self.config_service.set_offline_path(str(target))
+            self.offline_catalog = OfflineCatalogService()
         except Exception as exc:
             self._set_status(str(exc))
             return False
@@ -467,10 +477,8 @@ class AppViewModel(QObject):
         if self.currentDangerous and not confirmed:
             self.dangerousConfirmationRequested.emit()
             return False
-        log_level = str(self.settings.value("logLevel", "info"))
-        argv = build_argv(self._current, self._values, log_level)
         output = self._output_path()
-        request = JobRequest(self._current.name, argv, dict(self._values), output)
+        request = JobRequest(self._current.name, [], dict(self._values), output)
         self.queue.enqueue(request)
         self._set_status(f"Queued: {self._current.name}")
         return True
@@ -509,7 +517,7 @@ class AppViewModel(QObject):
         record = next((item for item in self.queue.records if item.request.id == job_id), None)
         if record is None:
             return
-        self._result = read_result(record.request.output_path)
+        self._result = read_result(record.request.output_path, api_result=record.result)
         self.resultChanged.emit()
 
     @Slot(str)
@@ -568,9 +576,7 @@ class AppViewModel(QObject):
 
     def _discover_offline_path(self) -> str:
         try:
-            from health_tools.config import load_config
-
-            configured = str(load_config().get("offline_tools_path", ""))
+            configured = str(self.config_service.show().config.get("offline_tools_path", ""))
             if configured and Path(configured).is_dir():
                 return configured
         except Exception:
@@ -590,8 +596,8 @@ class AppViewModel(QObject):
         self._status = status
         self.statusChanged.emit()
 
-    def _job_finished(self, _job_id: str, succeeded: bool) -> None:
-        self._set_status("Completed" if succeeded else "Failed")
+    def _job_finished(self, _job_id: str, status: str) -> None:
+        self._set_status(status.replace("_", " ").title())
         self.showJobResult(_job_id)
 
 
@@ -615,11 +621,12 @@ class RuleViewModel(QObject):
         self.rule_catalog = rule_catalog or RuleCatalogService(self)
         self.config_service = config_service or HealthConfigService()
         self.rule_catalog.changed.connect(self.documentChanged)
-        config_path = self.config_service.initialize_and_sync()
-        self._document = (
-            RuleDocument.load(config_path, kind="config")
-            if config_path.exists()
-            else RuleDocument.from_source(_rule_template("config"), kind="config")
+        shown = self.config_service.initialize_and_sync()
+        self._config_revision = shown.revision
+        self._rule_revision: str | None = None
+        self._rule_name = ""
+        self._document = RuleDocument.from_source(
+            shown.source or _rule_template("config"), kind="config"
         )
         self._issues: list[dict[str, str]] = []
         self._status = ""
@@ -721,11 +728,16 @@ class RuleViewModel(QObject):
     @Slot()
     def openConfig(self) -> None:
         try:
-            config_path = self.config_service.initialize_and_sync()
-            self._document = RuleDocument.load(config_path, kind="config")
+            shown = self.config_service.show()
+            self._config_revision = shown.revision
+            self._rule_revision = None
+            self._rule_name = ""
+            self._document = RuleDocument.from_source(
+                shown.source or _rule_template("config"), kind="config"
+            )
             self._selected_pointer = ""
             self._expanded_pointers = set(_container_pointers(self._document)[:2])
-            self._set_status(f"Opened {config_path}")
+            self._set_status("Opened global configuration")
             self.documentChanged.emit()
             self.selectionChanged.emit()
             self.validate()
@@ -735,7 +747,22 @@ class RuleViewModel(QObject):
     @Slot(str)
     def openPath(self, path: str) -> None:
         try:
-            self._document = RuleDocument.load(Path(path))
+            asset = next(
+                (item for item in self.rule_catalog.assets if item.path == Path(path)), None
+            )
+            if asset is not None:
+                result = run_read_rule(
+                    RuleReadRequest(RuleType(asset.kind), asset.name, RuleSource(asset.source))
+                )
+                self._document = RuleDocument.from_source(
+                    result.source, result.rule.path, result.rule.rule_type.value
+                )
+                self._rule_revision = result.revision
+                self._rule_name = result.rule.name
+            else:
+                self._document = RuleDocument.load(Path(path))
+                self._rule_revision = None
+                self._rule_name = self._document.path.name if self._document.path else ""
             self._selected_pointer = ""
             self._expanded_pointers = set(_container_pointers(self._document)[:2])
             self._set_status(f"Opened {path}")
@@ -748,6 +775,8 @@ class RuleViewModel(QObject):
     def newDocument(self, kind: str) -> None:
         template = _rule_template(kind)
         self._document = RuleDocument.from_source(template, kind=kind)
+        self._rule_revision = None
+        self._rule_name = ""
         self._selected_pointer = ""
         self._expanded_pointers = set(_container_pointers(self._document)[:2])
         self._set_status(f"New {kind} rule")
@@ -809,9 +838,7 @@ class RuleViewModel(QObject):
         self._issues = [issue.to_dict() for issue in self._document.validate()]
         self.validationChanged.emit()
         self._set_status(
-            "验证通过 / Validation passed"
-            if not self._issues
-            else "验证失败 / Validation failed"
+            "验证通过 / Validation passed" if not self._issues else "验证失败 / Validation failed"
         )
 
     @Slot(str, str)
@@ -906,40 +933,48 @@ class RuleViewModel(QObject):
                 if self._document.validate():
                     self._set_status("Resolve validation errors before saving")
                     return
-                if self._document.has_external_changes(self.config_service.user_config):
-                    self._set_status("配置文件已被外部修改 / Config changed externally")
-                    self.externalConflict.emit(str(self.config_service.user_config))
-                    return
-                saved = self.config_service.save(self._document.source())
-                self._document = RuleDocument.load(saved, kind="config")
+                saved = self.config_service.save(self._document.source(), self._config_revision)
+                self._config_revision = saved.revision
+                self._document = RuleDocument.from_source(saved.source, kind="config")
                 self.rule_catalog.refresh()
-                suffix = f" ({self.config_service.warning})" if self.config_service.warning else ""
-                self._set_status(f"Saved {saved}{suffix}")
+                self._set_status("Saved global configuration")
                 self.documentChanged.emit()
             except Exception as exc:
-                self._set_status(str(exc))
+                if "revision" in str(exc).lower():
+                    self._set_status("配置文件已被外部修改 / Config changed externally")
+                    self.externalConflict.emit("config")
+                else:
+                    self._set_status(str(exc))
             return
-        target = self._document.path
-        user_root = self.rule_catalog.user_rules_dir
-        writable_user_file = bool(
-            target and user_root and target.is_relative_to(user_root) and target.exists()
-        )
-        if not writable_user_file:
+        asset = self.rule_catalog.asset(self._document.kind, self._rule_name)
+        if asset is None or not asset.writable:
             self.saveNameRequested.emit()
             return
         try:
             if self._document.validate():
                 self._set_status("Resolve validation errors before saving")
                 return
-            if self._document.has_external_changes(target):
-                self._set_status("规则文件已被外部修改 / Rule changed externally")
-                self.externalConflict.emit(str(target))
-                return
-            saved = self._document.save(target, overwrite=True)
-            self._set_status(f"Saved {saved}")
+            saved = run_save_rule(
+                RuleSaveRequest(
+                    RuleType(self._document.kind),
+                    self._rule_name,
+                    self._document.source(),
+                    expected_revision=self._rule_revision,
+                )
+            )
+            self._rule_revision = saved.revision
+            self._document = RuleDocument.from_source(
+                saved.source, saved.rule.path, saved.rule.rule_type.value
+            )
+            self.rule_catalog.refresh()
+            self._set_status(f"Saved {saved.rule.path}")
             self.documentChanged.emit()
         except Exception as exc:
-            self._set_status(str(exc))
+            if "revision" in str(exc).lower():
+                self._set_status("规则文件已被外部修改 / Rule changed externally")
+                self.externalConflict.emit(str(self._document.path or self._rule_name))
+            else:
+                self._set_status(str(exc))
 
     @Slot(str, bool)
     def saveToLibrary(self, name: str, overwrite: bool = False) -> None:
@@ -947,16 +982,35 @@ class RuleViewModel(QObject):
             if self._document.kind == "config":
                 self._set_status("全局配置请通过 Config 命令保存")
                 return
-            target = self.rule_catalog.destination(self._document.kind, name)
-            if target.exists() and not overwrite:
-                self.saveConflict.emit(str(target))
+            safe_name = Path(name.strip()).name
+            if not safe_name.lower().endswith((".yaml", ".yml")):
+                safe_name += ".yaml"
+            if safe_name != (
+                name.strip() if name.lower().endswith((".yaml", ".yml")) else name.strip() + ".yaml"
+            ):
+                raise ValueError("规则名称只能包含文件名，不能包含目录")
+            existing = self.rule_catalog.asset(self._document.kind, safe_name)
+            if existing is not None and not overwrite:
+                self.saveConflict.emit(str(existing.path))
                 return
             if self._document.validate():
                 self._set_status("Resolve validation errors before saving")
                 return
-            saved = self._document.save(target, overwrite=overwrite)
+            saved = run_save_rule(
+                RuleSaveRequest(
+                    RuleType(self._document.kind),
+                    safe_name,
+                    self._document.source(),
+                    expected_revision=existing.revision if existing else None,
+                )
+            )
+            self._rule_name = saved.rule.name
+            self._rule_revision = saved.revision
+            self._document = RuleDocument.from_source(
+                saved.source, saved.rule.path, saved.rule.rule_type.value
+            )
             self.rule_catalog.refresh()
-            self._set_status(f"Saved {saved}")
+            self._set_status(f"Saved {saved.rule.path}")
             self.documentChanged.emit()
         except Exception as exc:
             self._set_status(str(exc))
@@ -982,6 +1036,7 @@ class RuleViewModel(QObject):
     def _set_status(self, status: str) -> None:
         self._status = status
         self.statusChanged.emit()
+
 
 def _rule_template(kind: str) -> str:
     templates = {

@@ -5,7 +5,38 @@ from pathlib import Path
 from typing import Any
 
 
-def read_result(output_path: str | None, limit: int = 50) -> dict[str, Any]:
+def read_result(
+    output_path: str | None,
+    limit: int = 50,
+    *,
+    api_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    preview = _read_output(output_path, limit)
+    if not api_result:
+        return preview
+    result = dict(preview)
+    result["apiKind"] = api_result.get("kind", "")
+    result["summary"] = api_result.get("counts", api_result.get("summary", {}))
+    batch = api_result.get("batch") if isinstance(api_result.get("batch"), dict) else api_result
+    result["apiItems"] = batch.get("items", []) if isinstance(batch, dict) else []
+    result["apiResult"] = api_result
+    if result["kind"] in {"none", "missing"}:
+        if api_result.get("kind") == "InfoResult" and api_result.get("preview"):
+            rows = api_result["preview"]
+            columns = list(rows[0]) if rows else []
+            result.update(
+                kind="csv",
+                title=str(api_result.get("target", "Info")),
+                columns=columns,
+                rows=[[row.get(column, "") for column in columns] for row in rows],
+            )
+        else:
+            result["kind"] = "api"
+            result["title"] = str(api_result.get("operation") or api_result.get("kind", "Result"))
+    return result
+
+
+def _read_output(output_path: str | None, limit: int) -> dict[str, Any]:
     if not output_path:
         return {"kind": "none", "title": "", "items": []}
     path = Path(output_path)

@@ -55,23 +55,6 @@ Item {
             }
         }
 
-        RowLayout {
-            HusText { Layout.preferredWidth: 180; text: appModel.locale === "zh_CN" ? "日志级别" : "Log level" }
-            HusSelect {
-                width: 280
-                model: [
-                    { label: "Debug", value: "debug" },
-                    { label: "Info", value: "info" },
-                    { label: "Warning", value: "warning" },
-                    { label: "Error", value: "error" }
-                ]
-                textRole: "label"
-                valueRole: "value"
-                currentIndex: ["debug", "info", "warning", "error"].indexOf(appModel.logLevel)
-                onActivated: appModel.setLogLevel(currentValue)
-            }
-        }
-
         HusDivider { Layout.fillWidth: true }
 
         HusText {
