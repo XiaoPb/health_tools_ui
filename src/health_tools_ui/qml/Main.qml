@@ -129,6 +129,8 @@ HusWindow {
                                 window.currentPage = "rules";
                             } else if (key === "settings") {
                                 window.currentPage = "settings";
+                            } else if (key === "config") {
+                                window.currentPage = "config";
                             }
                         }
                     }
@@ -144,10 +146,7 @@ HusWindow {
                         HusButton {
                             Layout.fillWidth: true
                             text: "Config · " + (appModel.locale === "zh_CN" ? "全局配置" : "Global config")
-                            onClicked: {
-                                ruleModel.requestOpenConfig();
-                                window.currentPage = "rules";
-                            }
+                            onClicked: window.currentPage = "config"
                         }
                         HusButton {
                             Layout.fillWidth: true
@@ -195,6 +194,8 @@ HusWindow {
                             HusText {
                                 text: window.currentPage === "rules"
                                       ? appModel.texts.rules
+                                      : window.currentPage === "config"
+                                        ? "全局配置"
                                       : window.currentPage === "settings"
                                         ? appModel.texts.settings
                                         : appModel.currentCommand.title
@@ -222,6 +223,7 @@ HusWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         sourceComponent: window.currentPage === "rules" ? rulePage
+                                       : window.currentPage === "config" ? configPage
                                        : window.currentPage === "settings" ? settingsPage
                                        : commandPage
                     }
@@ -232,6 +234,7 @@ HusWindow {
 
     Component { id: commandPage; CommandPage { } }
     Component { id: rulePage; RuleCenter { } }
+    Component { id: configPage; ConfigPage { } }
     Component { id: settingsPage; SettingsPage { } }
 
     TaskDrawer { id: taskDrawer }

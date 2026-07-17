@@ -12,6 +12,7 @@ class HealthConfigService:
     ) -> None:
         self._runner = runner
         self.warning = ""
+        self.scan_attempted = False
 
     def initialize_and_sync(self) -> ConfigResult:
         self.warning = ""
@@ -21,6 +22,7 @@ class HealthConfigService:
             shown = self._runner(ConfigRequest(ConfigAction.SHOW))
         try:
             shown = self._runner(ConfigRequest(ConfigAction.SCAN_OFFLINE))
+            self.scan_attempted = True
             if not shown.config.get("offline_versions"):
                 self.warning = "离线算法目录中未发现可用版本，请在设置中选择正确目录"
         except GHealthError as exc:
@@ -40,4 +42,19 @@ class HealthConfigService:
         )
 
     def set_offline_path(self, path: str) -> ConfigResult:
-        return self._runner(ConfigRequest(ConfigAction.SET_OFFLINE_PATH, value=path))
+        result = self._runner(ConfigRequest(ConfigAction.SET_OFFLINE_PATH, value=path))
+        self.scan_attempted = True
+        return result
+
+    def set_rules_dir(self, path: str) -> ConfigResult:
+        return self._runner(ConfigRequest(ConfigAction.SET_RULES_DIR, value=path))
+
+    def set_offline_default(self, chip: str, version: str) -> ConfigResult:
+        return self._runner(
+            ConfigRequest(ConfigAction.SET_OFFLINE_DEFAULT, value=f"{chip}={version}")
+        )
+
+    def scan_offline(self) -> ConfigResult:
+        result = self._runner(ConfigRequest(ConfigAction.SCAN_OFFLINE))
+        self.scan_attempted = True
+        return result

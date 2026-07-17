@@ -35,6 +35,7 @@ Item {
             id: editorLoader
             Layout.fillWidth: true
             sourceComponent: root.field.kind === "boolean" ? booleanEditor
+                           : root.field.name === "plot_type" ? segmentedEditor
                            : root.field.kind === "choice" ? choiceEditor
                            : root.field.kind === "multi_choice" ? multiChoiceEditor
                            : root.field.kind === "integer" || root.field.kind === "number" ? numberEditor
@@ -46,7 +47,8 @@ Item {
     Component {
         id: textEditor
         HusInput {
-            width: editorLoader.width
+            anchors.left: parent ? parent.left : undefined
+            anchors.right: parent ? parent.right : undefined
             text: {
                 appModel.valuesRevision;
                 const value = appModel.valuesForUi[root.field.name];
@@ -56,6 +58,43 @@ Item {
             placeholderText: root.field.default === null || root.field.default === undefined
                              ? "" : String(root.field.default)
             onEditingFinished: appModel.setValue(root.field.name, text)
+        }
+    }
+
+    Component {
+        id: segmentedEditor
+        HusSegmented {
+            id: segmentedControl
+            width: editorLoader.width
+            block: true
+            options: root.field.choices
+            property bool syncingIndex: false
+            function syncIndex() {
+                let nextIndex = 0;
+                appModel.valuesRevision;
+                const current = appModel.valuesForUi[root.field.name];
+                for (let index = 0; index < root.field.choices.length; index++) {
+                    if (root.field.choices[index].value === current) {
+                        nextIndex = index;
+                        break;
+                    }
+                }
+                syncingIndex = true;
+                currentIndex = nextIndex;
+                syncingIndex = false;
+            }
+            Component.onCompleted: Qt.callLater(syncIndex)
+            Connections {
+                target: appModel
+                function onValuesChanged() { Qt.callLater(segmentedControl.syncIndex); }
+            }
+            onCurrentIndexChanged: {
+                const value = String(currentValue);
+                const current = String(appModel.valuesForUi[root.field.name]);
+                if (!syncingIndex && currentIndex >= 0 && value !== current) {
+                    appModel.setStringValue(String(root.field.name), value);
+                }
+            }
         }
     }
 
@@ -119,6 +158,11 @@ Item {
                     return Array.isArray(value) ? value : [];
                 }
                 function syncValue() { appModel.setValue(root.field.name, selectedKeys); }
+                function reconcileOptions() {
+                    const allowed = root.field.choices.map(item => item.value);
+                    if (selectedKeys.some(key => allowed.indexOf(key) < 0)) clearTag();
+                }
+                onOptionsChanged: Qt.callLater(reconcileOptions)
                 onSelect: Qt.callLater(syncValue)
                 onDeselect: Qt.callLater(syncValue)
             }

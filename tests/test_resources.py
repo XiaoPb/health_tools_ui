@@ -42,4 +42,6 @@ def test_offline_catalog_maps_public_versions() -> None:
     assert [item["value"] for item in versions] == ["v2", "v1"]
     assert versions[0]["isDefault"] is True
     assert versions[1]["enabled"] is False
-    assert service.versions("gh3220", allow_missing=True)[1]["enabled"] is True
+    missing = service.versions("gh3220", allow_missing=True)[1]
+    assert missing["enabled"] is True
+    assert missing["executableAvailable"] is False

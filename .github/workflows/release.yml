@@ -18,24 +18,36 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12.12"
+      - name: Resolve release version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PORTABLE_NAME=health-tools-ui-$version-windows-x64.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SETUP_NAME=health-tools-ui-setup-$version.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: uv sync --locked --group dev
       - run: uv run pytest
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run python scripts/qml_smoke.py
       - run: uv run pyinstaller packaging/health_tools_ui.spec --noconfirm
       - run: New-Item -ItemType Directory -Force dist/HealthToolsUI/offline
-      - run: Compress-Archive -Path dist/HealthToolsUI/* -DestinationPath dist/HealthToolsUI-portable.zip
+      - run: Compress-Archive -Path dist/HealthToolsUI/* -DestinationPath "dist/$env:PORTABLE_NAME"
       - uses: crazy-max/ghaction-chocolatey@v3
         with:
           args: install innosetup --yes --no-progress
-      - run: iscc packaging/installer.iss
+      - run: iscc "/DMyAppVersion=$env:RELEASE_VERSION" "/DMyOutputBaseFilename=health-tools-ui-setup-$env:RELEASE_VERSION" packaging/installer.iss
       - shell: pwsh
         run: |
-          Get-FileHash dist/HealthToolsUI-portable.zip, dist/HealthToolsUI-Setup.exe -Algorithm SHA256 |
+          Get-FileHash "dist/$env:PORTABLE_NAME", "dist/$env:SETUP_NAME" -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } |
             Set-Content dist/SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/HealthToolsUI-portable.zip
-            dist/HealthToolsUI-Setup.exe
+            dist/health-tools-ui-*-windows-x64.zip
+            dist/health-tools-ui-setup-*.exe
             dist/SHA256SUMS.txt
             THIRD_PARTY_NOTICES.md

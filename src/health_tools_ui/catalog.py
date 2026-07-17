@@ -78,11 +78,12 @@ PRIMARY_FIELDS = {
     "factory": {"input_path", "chip_name", "rule_file", "output_path"},
     "config": {"action", "value", "force"},
     "evaluate": {"input_path", "output_path", "eval_type", "chip", "rule_file"},
-    "offline": {"input_path", "output_path", "chip_name", "ver", "versions", "do_list"},
+    "offline": {"input_path", "output_path", "chip_name", "ver", "versions", "no_run"},
     "check": {"input_path", "chip_name", "checks", "output_path", "sort_report"},
 }
 PATH_FIELDS = {"input_path", "output_path", "rule_file", "target", "report_path", "sort_output"}
 TUPLE_FIELDS = {"extend_files", "ppg_maps"}
+MULTI_CHOICE_FIELDS = {("check", "checks")}
 INTEGER_FIELDS = {
     "sample_rate",
     "window",
@@ -145,10 +146,11 @@ BOOLEAN_FIELDS = {
     "sort_report",
 }
 CHOICES: dict[tuple[str, str], tuple[Any, ...]] = {
-    ("plot", "plot_type"): ("both", "ac", "psd"),
+    ("plot", "plot_type"): ("time", "freq", "stft", "psd", "ac", "fft", "both"),
     ("plot", "fmt"): ("png", "svg", "pdf"),
     ("plot", "baseline_method"): ("mean", "median"),
-    ("plot", "psd_acc"): ("axis", "magnitude"),
+    ("plot", "psd_acc"): ("axis", "rms"),
+    ("check", "checks"): ("range", "ipd", "frame", "center", "acc"),
     ("classify", "mode"): ("copy", "move", "symlink"),
     ("evaluate", "eval_type"): ("hr", "spo2"),
     ("config", "action"): (
@@ -182,6 +184,26 @@ FIELD_HELP = {
     "force": "初始化时覆盖已存在的内置规则",
     "filter_name": "仅处理文件名包含该文本的文件",
     "do_list": "只读取可用芯片和算法版本",
+    "checks": "默认执行范围、Ipd、帧完整性、数据居中和 ACC 五项检查",
+    "channels": "通道名；AC 可用分号分隔多组通道",
+    "psd_acc": "PSD 的 ACC 聚合方式：分轴或 RMS",
+}
+
+CHOICE_LABELS: dict[tuple[str, str, Any], str] = {
+    ("plot", "plot_type", "time"): "时域",
+    ("plot", "plot_type", "freq"): "频域",
+    ("plot", "plot_type", "stft"): "STFT",
+    ("plot", "plot_type", "psd"): "PSD",
+    ("plot", "plot_type", "ac"): "自相关",
+    ("plot", "plot_type", "fft"): "FFT",
+    ("plot", "plot_type", "both"): "组合",
+    ("plot", "psd_acc", "axis"): "分轴",
+    ("plot", "psd_acc", "rms"): "RMS",
+    ("check", "checks", "range"): "范围",
+    ("check", "checks", "ipd"): "Ipd",
+    ("check", "checks", "frame"): "帧完整性",
+    ("check", "checks", "center"): "数据居中",
+    ("check", "checks", "acc"): "ACC",
 }
 
 
@@ -234,7 +256,8 @@ def build_catalog() -> tuple[CommandSpec, ...]:
             name = item.name
             provider = _provider(command, name)
             choices = tuple(
-                FieldChoice(str(value), value) for value in CHOICES.get((command, name), ())
+                FieldChoice(CHOICE_LABELS.get((command, name, value), str(value)), value)
+                for value in CHOICES.get((command, name), ())
             )
             path_mode = "any" if name in {"input_path", "target"} else "file"
             if name == "output_path":
@@ -244,6 +267,8 @@ def build_catalog() -> tuple[CommandSpec, ...]:
             default = _default(item)
             if command == "config" and name == "action":
                 default = "show"
+            elif command == "check" and name == "checks":
+                default = ["range", "ipd", "frame", "center", "acc"]
             ui_fields.append(
                 FieldSpec(
                     name=name,
@@ -253,7 +278,7 @@ def build_catalog() -> tuple[CommandSpec, ...]:
                     required=item.default is MISSING and item.default_factory is MISSING,
                     default=default,
                     choices=choices,
-                    multiple=name in TUPLE_FIELDS,
+                    multiple=name in TUPLE_FIELDS or (command, name) in MULTI_CHOICE_FIELDS,
                     advanced=name not in PRIMARY_FIELDS[command],
                     path_mode=path_mode,
                     dangerous_values=DANGEROUS.get(name, ()),

@@ -53,6 +53,17 @@ Item {
                 width: root.width - 46
                 spacing: 8
 
+                Repeater {
+                    model: appModel.currentFields.filter(field => !field.advanced)
+                    delegate: FieldEditor {
+                        required property var modelData
+                        field: modelData
+                        visible: !field.advanced || root.showAdvanced
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: visible ? implicitHeight : 0
+                    }
+                }
+
                 Rectangle {
                     visible: appModel.currentCommand.name === "offline"
                     Layout.fillWidth: true
@@ -65,16 +76,39 @@ Item {
                         id: offlineColumn
                         anchors.fill: parent
                         anchors.margins: 12
+                        spacing: 8
+                        RowLayout {
+                            Layout.fillWidth: true
+                            HusText { text: "算法版本"; font.weight: Font.DemiBold }
+                            HusTag {
+                                text: appModel.offlineCatalogStatus
+                                presetColor: appModel.offlineCatalogState === "available" ? "green"
+                                           : appModel.offlineCatalogState === "error" ? "red" : "orange"
+                            }
+                            Item { Layout.fillWidth: true }
+                            HusIconButton {
+                                iconSource: HusIcon.FolderOpenOutlined
+                                contentDescription: "选择离线算法目录"
+                                onClicked: appModel.chooseOfflinePath()
+                            }
+                            HusIconButton {
+                                iconSource: HusIcon.ReloadOutlined
+                                contentDescription: "重新扫描"
+                                onClicked: appModel.rescanOffline()
+                            }
+                        }
                         HusText {
-                            text: appModel.locale === "zh_CN" ? "算法版本" : "Algorithm versions"
-                            font.weight: Font.DemiBold
+                            Layout.fillWidth: true
+                            text: appModel.offlinePath || "未选择目录"
+                            color: HusTheme.Primary.colorTextSecondary
+                            elide: Text.ElideMiddle
                         }
                         HusSegmented {
                             Layout.minimumWidth: 320
                             options: [
-                                { label: appModel.locale === "zh_CN" ? "默认版本" : "Default", value: "default" },
-                                { label: appModel.locale === "zh_CN" ? "指定版本" : "Selected", value: "selected" },
-                                { label: appModel.locale === "zh_CN" ? "全部版本" : "All", value: "all" }
+                                { label: "默认版本", value: "default" },
+                                { label: "指定版本", value: "selected" },
+                                { label: "全部版本", value: "all" }
                             ]
                             currentIndex: ["default", "selected", "all"].indexOf(appModel.offlineVersionMode)
                             onCurrentIndexChanged: {
@@ -82,6 +116,7 @@ Item {
                             }
                         }
                         HusMultiSelect {
+                            id: offlineVersions
                             Layout.fillWidth: true
                             Layout.minimumWidth: 360
                             visible: appModel.offlineVersionMode === "selected"
@@ -90,32 +125,41 @@ Item {
                             textRole: "label"
                             valueRole: "value"
                             defaultSelectedKeys: appModel.offlineSelectedVersions
-                            placeholderText: appModel.locale === "zh_CN" ? "选择一个或多个版本" : "Select one or more versions"
+                            placeholderText: "选择一个或多个版本"
                             function syncVersions() { appModel.setOfflineVersions(selectedKeys); }
+                            function reconcileOptions() {
+                                const allowed = appModel.offlineVersionChoices.map(item => item.value);
+                                if (selectedKeys.some(key => allowed.indexOf(key) < 0)) {
+                                    clearTag();
+                                    appModel.setOfflineVersions([]);
+                                }
+                            }
+                            onOptionsChanged: Qt.callLater(reconcileOptions)
                             onSelect: Qt.callLater(syncVersions)
                             onDeselect: Qt.callLater(syncVersions)
                         }
-                        HusText {
-                            Layout.fillWidth: true
-                            visible: appModel.offlineVersionMode === "selected"
-                                     && appModel.offlineVersionChoices.length === 0
-                            text: appModel.locale === "zh_CN"
-                                  ? "未发现算法版本。请在设置中选择离线算法目录，或执行配置扫描。"
-                                  : "No algorithm versions found. Select the offline tools directory in Settings or scan the configuration."
-                            color: HusTheme.Primary.colorTextSecondary
-                            wrapMode: Text.Wrap
+                        Repeater {
+                            model: appModel.offlineVersionChoices
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                HusText { Layout.fillWidth: true; text: modelData.label }
+                                HusTag {
+                                    text: modelData.executableAvailable ? "EXE 可用" : "EXE 缺失"
+                                    presetColor: modelData.executableAvailable ? "green" : "red"
+                                }
+                            }
                         }
                     }
                 }
 
                 Repeater {
-                    model: appModel.currentFields
+                    model: root.showAdvanced
+                           ? appModel.currentFields.filter(field => field.advanced) : []
                     delegate: FieldEditor {
                         required property var modelData
                         field: modelData
-                        visible: !field.advanced || root.showAdvanced
                         Layout.fillWidth: true
-                        Layout.preferredHeight: visible ? implicitHeight : 0
                     }
                 }
 

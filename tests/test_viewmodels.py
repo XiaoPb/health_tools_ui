@@ -8,7 +8,7 @@ from PySide6.QtTest import QSignalSpy
 
 from health_tools_ui.config_service import HealthConfigService
 from health_tools_ui.resources import RuleCatalogService
-from health_tools_ui.viewmodels import AppViewModel, RuleViewModel
+from health_tools_ui.viewmodels import AppViewModel, ConfigViewModel, RuleViewModel
 
 
 class FakeConfigApi:
@@ -46,10 +46,9 @@ class StubConfigService:
         )
 
 
-def config_model(source: str) -> tuple[RuleViewModel, FakeConfigApi]:
+def config_model(source: str) -> tuple[ConfigViewModel, FakeConfigApi]:
     api = FakeConfigApi(source)
-    catalog = RuleCatalogService(list_runner=lambda _request: RuleCatalogResult())
-    return RuleViewModel(rule_catalog=catalog, config_service=HealthConfigService(api)), api
+    return ConfigViewModel(config_service=HealthConfigService(api)), api
 
 
 def test_offline_version_modes_map_to_original_click_fields(qapp, tmp_path) -> None:
@@ -121,19 +120,16 @@ def test_config_reloads_from_user_file_when_opened(qapp, tmp_path) -> None:
     model, api = config_model("rules_dir: first\n")
     api.source = "rules_dir: second\n"
     api.revision = "r2"
-    model.requestOpenConfig()
+    model.reload()
 
-    assert model.kind == "config"
-    assert model.selectedNode["kind"] == "mapping"
-    model.selectNode("/rules_dir")
-    assert model.selectedNode["rawValue"] == "second"
+    assert model.rulesDir == "second"
     assert model.dirty is False
 
 
 def test_config_save_rejects_external_changes(qapp, tmp_path) -> None:
     model, api = config_model("rules_dir: original\nretries: 5\n")
 
-    model.setVisualValue("/rules_dir", "draft")
+    model.setValue("rules_dir", "draft")
     api.source = "rules_dir: external\nretries: 5\n"
     api.revision = "r2"
     model.save()
@@ -148,7 +144,7 @@ def test_equal_config_edit_and_clean_save_do_not_write(qapp, tmp_path) -> None:
     model, api = config_model(original)
     changed = QSignalSpy(model.documentChanged)
 
-    model.setVisualValue("/rules_dir", "original")
+    model.setValue("rules_dir", "original")
     model.save()
 
     assert changed.count() == 0
@@ -158,10 +154,67 @@ def test_equal_config_edit_and_clean_save_do_not_write(qapp, tmp_path) -> None:
 
 
 def test_non_finite_rule_number_is_rejected(qapp, tmp_path) -> None:
-    model, _api = config_model("rules_dir: original\nretries: 5\n")
+    catalog = RuleCatalogService(list_runner=lambda _request: RuleCatalogResult())
+    model = RuleViewModel(rule_catalog=catalog)
+    model.setSource("version: '1.0'\nregex: '(.*)'\ncolumns: [value]\nretries: 5\n")
 
     for value in (math.nan, math.inf, -math.inf):
         model.setVisualNumber("/retries", value)
         model.selectNode("/retries")
         assert model.selectedNode["rawValue"] == 5
-        assert model.dirty is False
+
+
+def test_catalog_refresh_and_scalar_edit_do_not_reset_rule_tree(qapp) -> None:
+    catalog = RuleCatalogService(list_runner=lambda _request: RuleCatalogResult())
+    model = RuleViewModel(rule_catalog=catalog)
+    resets = QSignalSpy(model.documentReset)
+    catalog_changes = QSignalSpy(model.catalogChanged)
+    node_changes = QSignalSpy(model.nodeDataChanged)
+
+    model.setNodeExpanded("/columns", True)
+    catalog.refresh()
+    model.setVisualValue("/version", "2.0")
+
+    assert resets.count() == 0
+    assert catalog_changes.count() == 1
+    assert node_changes.count() == 1
+    assert model.expandedPointers == ["/columns"]
+
+
+def test_list_mutations_remap_selection_to_original_item(qapp) -> None:
+    catalog = RuleCatalogService(list_runner=lambda _request: RuleCatalogResult())
+    model = RuleViewModel(rule_catalog=catalog)
+    model.setSource("version: '1.0'\nregex: '(.*),(.*)'\ncolumns: [first, second]\n")
+    model.selectNode("/columns/0")
+
+    model.moveEntry("/columns/0", 1)
+
+    assert model.selectedPointer == "/columns/1"
+    assert model.selectedNode["rawValue"] == "first"
+
+    model.selectNode("/columns")
+    model.addListItem()
+    assert model.selectedPointer == "/columns/2"
+
+    model.removeEntry("/columns/2")
+    assert model.selectedPointer == "/columns"
+
+
+def test_command_fields_hide_internal_offline_action_and_filter_plot_options(
+    qapp, tmp_path
+) -> None:
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    model = AppViewModel(settings)
+    model.selectCommand("offline")
+    assert "do_list" not in {field["name"] for field in model.currentFields}
+
+    model.selectCommand("plot")
+    model.setValue("plot_type", "psd")
+    psd_fields = {field["name"] for field in model.currentFields}
+    assert "psd_acc" in psd_fields
+    assert "freq_range" not in psd_fields
+
+    model.setValue("plot_type", "fft")
+    fft_fields = {field["name"] for field in model.currentFields}
+    assert "freq_range" in fft_fields
+    assert "psd_acc" not in fft_fields

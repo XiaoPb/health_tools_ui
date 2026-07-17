@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from health_tools.api import ConfigAction, ParseRequest
+from health_tools.api import CheckRequest, ConfigAction, ParseRequest
 
 from health_tools_ui.api_adapter import build_request
 from health_tools_ui.arguments import is_dangerous, validate_values
@@ -34,3 +34,8 @@ def test_config_action_maps_to_enum() -> None:
     request = build_request("config", {"action": "init", "force": True})
     assert request.action == ConfigAction.INIT
     assert request.force is True
+
+
+def test_check_multiselect_serializes_to_public_comma_value() -> None:
+    request = build_request("check", {"checks": ["range", "ipd", "frame", "center", "acc"]})
+    assert request == CheckRequest(checks="range,ipd,frame,center,acc")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import sys
 from pathlib import Path
@@ -132,6 +133,7 @@ class AppViewModel(QObject):
     settingsChanged = Signal()
     statusChanged = Signal()
     resultChanged = Signal()
+    offlineCatalogChanged = Signal()
     dangerousConfirmationRequested = Signal()
 
     def __init__(
@@ -154,6 +156,10 @@ class AppViewModel(QObject):
         self.config_service = config_service or HealthConfigService()
         self.offline_catalog = OfflineCatalogService()
         self._offline_path = self._discover_offline_path()
+        self._offline_scan_attempted = bool(
+            getattr(self.config_service, "scan_attempted", False)
+            or self.offline_catalog.chips()
+        )
         self._status = self.config_service.warning or TEXTS[self._locale]["ready"]
         self._result: dict[str, Any] = {"kind": "none", "title": "", "items": []}
         self._selected_log = ""
@@ -196,7 +202,12 @@ class AppViewModel(QObject):
                 "ver",
                 "versions",
                 "all_versions",
+                "do_list",
             }:
+                continue
+            if self._current.name == "plot" and not _plot_field_visible(
+                field.name, str(self._values.get("plot_type") or "both")
+            ):
                 continue
             item = field.to_dict()
             if item["default"] is None:
@@ -224,6 +235,8 @@ class AppViewModel(QObject):
                         )
                 item["choices"] = choices
                 item["kind"] = "multi_choice" if field.multiple else "choice"
+            elif field.multiple and item["choices"]:
+                item["kind"] = "multi_choice"
             fields.append(item)
         return fields
 
@@ -246,6 +259,25 @@ class AppViewModel(QObject):
     @Property(list, notify=valuesChanged)
     def offlineSelectedVersions(self) -> list[str]:
         return list(self._offline_selected_versions)
+
+    @Property(str, notify=offlineCatalogChanged)
+    def offlineCatalogState(self) -> str:
+        return self._offline_catalog_state()
+
+    def _offline_catalog_state(self) -> str:
+        if self.offline_catalog.error:
+            return "error"
+        if not self._offline_path:
+            return "unconfigured"
+        if not self._offline_scan_attempted:
+            return "unscanned"
+        if not self.offline_catalog.chips():
+            return "empty"
+        return "available"
+
+    @Property(str, notify=offlineCatalogChanged)
+    def offlineCatalogStatus(self) -> str:
+        return _offline_status_text(self._offline_catalog_state(), self.offline_catalog.error)
 
     @Property(int, notify=valuesChanged)
     def valuesRevision(self) -> int:
@@ -335,13 +367,23 @@ class AppViewModel(QObject):
         self._values[name] = value
         if self._current.name == "config" and name == "action":
             self.currentCommandChanged.emit()
-        if self._current.name == "offline" and name in {"chip_name", "no_run"}:
+        if self._current.name == "plot" and name == "plot_type":
+            self.currentCommandChanged.emit()
+        if self._current.name == "offline" and name == "chip_name":
+            self._offline_selected_versions = []
+            self._offline_mode = "default"
+            self._apply_offline_versions(emit=False)
+        elif self._current.name == "offline" and name == "no_run":
             available = {item["value"] for item in self._offline_version_choices()}
             self._offline_selected_versions = [
                 version for version in self._offline_selected_versions if version in available
             ]
         self._revision += 1
         self.valuesChanged.emit()
+
+    @Slot(str, str)
+    def setStringValue(self, name: str, value: str) -> None:
+        self.setValue(name, value)
 
     @Slot(str, float)
     def setNumericValue(self, name: str, value: float) -> None:
@@ -434,13 +476,44 @@ class AppViewModel(QObject):
             return False
         self._offline_path = str(target)
         self._offline_selected_versions = []
+        self._offline_scan_attempted = True
         self.settings.setValue("offlinePath", self._offline_path)
         self.settingsChanged.emit()
+        self.offlineCatalogChanged.emit()
         self._revision += 1
         self.currentCommandChanged.emit()
         self.valuesChanged.emit()
         self._set_status(f"Offline tools: {target}")
         return True
+
+    @Slot(result=bool)
+    def rescanOffline(self) -> bool:
+        if not self._offline_path:
+            self._set_status("请先选择离线算法目录")
+            return False
+        try:
+            scan = getattr(self.config_service, "scan_offline", None)
+            if scan is not None:
+                scan()
+            self.offline_catalog.refresh()
+            self._offline_scan_attempted = True
+            self._offline_selected_versions = []
+            self._offline_mode = "default"
+            self._apply_offline_versions(emit=False)
+            self._revision += 1
+            self.currentCommandChanged.emit()
+            self.valuesChanged.emit()
+            self.offlineCatalogChanged.emit()
+            self._set_status(
+                _offline_status_text(self._offline_catalog_state(), self.offline_catalog.error)
+            )
+            return not bool(self.offline_catalog.error)
+        except Exception as exc:
+            self._offline_scan_attempted = True
+            self.offline_catalog.error = str(exc)
+            self.offlineCatalogChanged.emit()
+            self._set_status(str(exc))
+            return False
 
     @Slot(str, bool)
     def chooseFile(self, field_name: str, save: bool = False) -> None:
@@ -559,7 +632,7 @@ class AppViewModel(QObject):
             return self.rule_catalog.choices("classify", patterns_only=True)
         return self.rule_catalog.choices(provider, absolute=provider == "all_rules")
 
-    def _apply_offline_versions(self) -> None:
+    def _apply_offline_versions(self, *, emit: bool = True) -> None:
         self._values["ver"] = None
         self._values["versions"] = None
         self._values["all_versions"] = self._offline_mode == "all"
@@ -568,8 +641,9 @@ class AppViewModel(QObject):
                 self._values["ver"] = self._offline_selected_versions[0]
             elif len(self._offline_selected_versions) > 1:
                 self._values["versions"] = ",".join(self._offline_selected_versions)
-        self._revision += 1
-        self.valuesChanged.emit()
+        if emit:
+            self._revision += 1
+            self.valuesChanged.emit()
 
     def _output_path(self) -> str | None:
         for name in ("sort_output", "output_path", "output"):
@@ -605,8 +679,215 @@ class AppViewModel(QObject):
         self.showJobResult(_job_id)
 
 
-class RuleViewModel(QObject):
+def _plot_field_visible(name: str, plot_type: str) -> bool:
+    relevant = {
+        "window": {"freq", "stft", "ac", "both"},
+        "overlap": {"freq", "stft", "ac", "both"},
+        "bandpass": {"time", "freq", "stft", "ac", "fft", "both"},
+        "remove_baseline": {"time", "freq", "stft", "ac", "fft", "both"},
+        "baseline_method": {"time", "freq", "stft", "ac", "fft", "both"},
+        "freq_bpm": {"freq", "stft", "fft", "both"},
+        "freq_range": {"freq", "stft", "fft", "both"},
+        "ref_column": {"time", "both"},
+        "psd_acc": {"psd"},
+    }
+    return plot_type in relevant.get(name, {plot_type})
+
+
+def _offline_status_text(state: str, error: str = "") -> str:
+    messages = {
+        "unconfigured": "尚未配置离线算法目录",
+        "unscanned": "目录已配置，尚未扫描",
+        "empty": "目录中没有识别到算法版本",
+        "available": "算法版本目录可用",
+        "error": f"算法目录读取失败：{error}",
+    }
+    return messages[state]
+
+
+class ConfigViewModel(QObject):
     documentChanged = Signal()
+    statusChanged = Signal()
+    dirtyChanged = Signal()
+    externalConflict = Signal(str)
+
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        config_service: HealthConfigService | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.config_service = config_service or HealthConfigService()
+        self._document = RuleDocument.from_source("{}\n", kind="config")
+        self._revision: str | None = None
+        self._config: dict[str, Any] = {}
+        self._status = ""
+        self.reload()
+
+    @Property(str, notify=documentChanged)
+    def source(self) -> str:
+        return self._document.editor_source()
+
+    @Property(str, notify=documentChanged)
+    def rulesDir(self) -> str:
+        return str(self._config.get("rules_dir", ""))
+
+    @Property(str, notify=documentChanged)
+    def offlinePath(self) -> str:
+        return str(self._config.get("offline_tools_path", ""))
+
+    @Property(list, notify=documentChanged)
+    def offlineVersions(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        configured = self._config.get("offline_versions", {})
+        if not isinstance(configured, dict):
+            return rows
+        for chip, chip_data in configured.items():
+            if not isinstance(chip_data, dict):
+                continue
+            default = str(chip_data.get("default", ""))
+            categories = chip_data.get("versions", {})
+            if isinstance(categories, list):
+                categories = {"exclusive": categories}
+            if not isinstance(categories, dict):
+                continue
+            for category, versions in categories.items():
+                if not isinstance(versions, list):
+                    continue
+                rows.extend(
+                    {
+                        "key": f"{chip}:{version}",
+                        "chip": str(chip),
+                        "category": str(category),
+                        "version": str(version),
+                        "defaultLabel": "默认" if str(version) == default else "",
+                    }
+                    for version in versions
+                )
+        return rows
+
+    @Property(bool, notify=dirtyChanged)
+    def dirty(self) -> bool:
+        return self._document.dirty
+
+    @Property(str, notify=statusChanged)
+    def status(self) -> str:
+        return self._status
+
+    @Slot()
+    def reload(self) -> None:
+        try:
+            shown = self.config_service.show()
+            self._revision = shown.revision
+            self._document = RuleDocument.from_source(shown.source or "{}\n", kind="config")
+            self._config = dict(shown.config) or dict(self._document.data)
+            self._set_status("已加载全局配置")
+            self.documentChanged.emit()
+            self.dirtyChanged.emit()
+        except Exception as exc:
+            self._set_status(str(exc))
+
+    @Slot(str)
+    def setSource(self, source: str) -> None:
+        if source == self._document.editor_source():
+            return
+        issues = self._document.replace_source(source)
+        if issues:
+            self._set_status(issues[0].message_zh)
+        self.documentChanged.emit()
+        self.dirtyChanged.emit()
+
+    @Slot(str, str)
+    def setValue(self, key: str, value: str) -> None:
+        try:
+            source = json.dumps(value, ensure_ascii=False)
+            if key in self._document.data:
+                changed = self._document.set_value(f"/{key}", source)
+            else:
+                self._document.add_child("", key, source)
+                changed = True
+            if not changed:
+                return
+            self._config = dict(self._document.data)
+            self.documentChanged.emit()
+            self.dirtyChanged.emit()
+        except Exception as exc:
+            self._set_status(str(exc))
+
+    @Slot()
+    def chooseRulesDir(self) -> None:
+        path = QFileDialog.getExistingDirectory(None, "选择规则目录")
+        if path:
+            self.setValue("rules_dir", path)
+
+    @Slot()
+    def chooseOfflinePath(self) -> None:
+        path = QFileDialog.getExistingDirectory(None, "选择离线算法目录")
+        if path:
+            self.setValue("offline_tools_path", path)
+
+    @Slot()
+    def save(self) -> None:
+        if not self._document.dirty:
+            self._set_status("没有实际修改")
+            return
+        try:
+            saved = self.config_service.save(self._document.source(), self._revision)
+            self._revision = saved.revision
+            self._document = RuleDocument.from_source(saved.source or "{}\n", kind="config")
+            self._config = dict(saved.config) or dict(self._document.data)
+            self._set_status("全局配置已保存")
+            self.documentChanged.emit()
+            self.dirtyChanged.emit()
+        except Exception as exc:
+            if "revision" in str(exc).lower():
+                self._set_status("配置文件已被外部修改")
+                self.externalConflict.emit("config")
+            else:
+                self._set_status(str(exc))
+
+    @Slot(result=bool)
+    def scanOffline(self) -> bool:
+        try:
+            if self._document.dirty:
+                self.save()
+                if self._document.dirty:
+                    return False
+            self.config_service.scan_offline()
+            self.reload()
+            self._set_status("离线算法扫描完成")
+            return True
+        except Exception as exc:
+            self._set_status(str(exc))
+            return False
+
+    @Slot(str, str, result=bool)
+    def setOfflineDefault(self, chip: str, version: str) -> bool:
+        try:
+            self.config_service.set_offline_default(chip, version)
+            self.reload()
+            self._set_status(f"{chip} 默认版本已设为 {version}")
+            return True
+        except Exception as exc:
+            self._set_status(str(exc))
+            return False
+
+    def _set_status(self, status: str) -> None:
+        self._status = status
+        self.statusChanged.emit()
+
+
+class RuleViewModel(QObject):
+    documentReset = Signal()
+    documentChanged = Signal()
+    sourceChanged = Signal()
+    formChanged = Signal()
+    metadataChanged = Signal()
+    nodeDataChanged = Signal(str, object)
+    structureChanged = Signal()
+    catalogChanged = Signal()
+    dirtyChanged = Signal()
+    expandedChanged = Signal()
     validationChanged = Signal()
     statusChanged = Signal()
     saveNameRequested = Signal()
@@ -624,44 +905,44 @@ class RuleViewModel(QObject):
         super().__init__(parent)
         self.rule_catalog = rule_catalog or RuleCatalogService(self)
         self.config_service = config_service or HealthConfigService()
-        self.rule_catalog.changed.connect(self.documentChanged)
-        shown = self.config_service.initialize_and_sync()
-        self._config_revision = shown.revision
+        self.rule_catalog.changed.connect(self._catalog_changed)
         self._rule_revision: str | None = None
         self._rule_name = ""
-        self._document = RuleDocument.from_source(
-            shown.source or _rule_template("config"), kind="config"
-        )
+        self._document = RuleDocument.from_source(_rule_template("parse"), kind="parse")
         self._issues: list[dict[str, str]] = []
         self._status = ""
         self._selected_pointer = ""
         self._expanded_pointers: set[str] = set()
 
-    @Property(str, notify=documentChanged)
+    @Property(str, notify=sourceChanged)
     def source(self) -> str:
         return self._document.editor_source()
 
-    @Property(str, notify=documentChanged)
+    @Property(str, notify=metadataChanged)
     def path(self) -> str:
         return str(self._document.path or "")
 
-    @Property(str, notify=documentChanged)
+    @Property(str, notify=metadataChanged)
     def kind(self) -> str:
         return self._document.kind
 
-    @Property(list, notify=documentChanged)
+    @Property(list, constant=True)
     def kinds(self) -> list[str]:
         return list(RULE_KINDS)
 
-    @Property(list, notify=documentChanged)
+    @Property(list, notify=documentReset)
     def entries(self) -> list[dict[str, Any]]:
         return self._document.visual_entries()
 
-    @Property(list, notify=documentChanged)
+    @Property(list, notify=documentReset)
     def tree(self) -> list[dict[str, Any]]:
         return self._document.tree_nodes()
 
-    @Property(str, notify=documentChanged)
+    @Property(list, notify=formChanged)
+    def formFields(self) -> list[dict[str, Any]]:
+        return self._document.form_fields()
+
+    @Property(str, notify=selectionChanged)
     def selectedPointer(self) -> str:
         return self._selected_pointer
 
@@ -686,18 +967,30 @@ class RuleViewModel(QObject):
         except Exception:
             return False
 
-    @Property(bool, notify=documentChanged)
+    @Property(bool, notify=dirtyChanged)
     def dirty(self) -> bool:
         return self._document.dirty
 
-    @Property(list, notify=documentChanged)
+    @Property(list, notify=catalogChanged)
     def availableRules(self) -> list[dict[str, Any]]:
         kind = self._document.kind
-        if kind == "config":
-            return []
         return self.rule_catalog.choices(kind)
 
-    @Property(list, notify=documentChanged)
+    @Property(list, notify=catalogChanged)
+    def catalogEntries(self) -> list[dict[str, Any]]:
+        return [
+            {
+                **asset.to_dict(),
+                "key": str(asset.path),
+                "type": asset.kind,
+                "sourceLabel": "用户" if asset.source == "user" else "内置",
+                "overrideLabel": "覆盖内置" if asset.overrides_builtin else "—",
+                "writableLabel": "可写" if asset.writable else "只读",
+            }
+            for asset in self.rule_catalog.assets
+        ]
+
+    @Property(list, notify=expandedChanged)
     def expandedPointers(self) -> list[str]:
         return sorted(self._expanded_pointers)
 
@@ -722,32 +1015,6 @@ class RuleViewModel(QObject):
         else:
             self.openPath(path)
 
-    @Slot()
-    def requestOpenConfig(self) -> None:
-        if self._document.dirty:
-            self.discardConfirmationRequested.emit("config", "")
-        else:
-            self.openConfig()
-
-    @Slot()
-    def openConfig(self) -> None:
-        try:
-            shown = self.config_service.show()
-            self._config_revision = shown.revision
-            self._rule_revision = None
-            self._rule_name = ""
-            self._document = RuleDocument.from_source(
-                shown.source or _rule_template("config"), kind="config"
-            )
-            self._selected_pointer = ""
-            self._expanded_pointers = set(_container_pointers(self._document)[:2])
-            self._set_status("Opened global configuration")
-            self.documentChanged.emit()
-            self.selectionChanged.emit()
-            self.validate()
-        except Exception as exc:
-            self._set_status(str(exc))
-
     @Slot(str)
     def openPath(self, path: str) -> None:
         try:
@@ -770,7 +1037,7 @@ class RuleViewModel(QObject):
             self._selected_pointer = ""
             self._expanded_pointers = set(_container_pointers(self._document)[:2])
             self._set_status(f"Opened {path}")
-            self.documentChanged.emit()
+            self._emit_document_reset()
             self.validate()
         except Exception as exc:
             self._set_status(str(exc))
@@ -784,8 +1051,26 @@ class RuleViewModel(QObject):
         self._selected_pointer = ""
         self._expanded_pointers = set(_container_pointers(self._document)[:2])
         self._set_status(f"New {kind} rule")
-        self.documentChanged.emit()
+        self._emit_document_reset()
         self.validate()
+
+    @Slot(str, str, str)
+    def loadDraft(self, kind: str, name: str, source: str) -> None:
+        if kind not in RULE_KINDS:
+            self._set_status(f"Unsupported rule kind: {kind}")
+            return
+        try:
+            self._document = RuleDocument.from_source(source, kind=kind)
+            self._document.dirty = True
+            self._rule_revision = None
+            self._rule_name = name
+            self._selected_pointer = ""
+            self._expanded_pointers = set(_container_pointers(self._document)[:2])
+            self._set_status("规则草稿已载入高级编辑器")
+            self._emit_document_reset()
+            self.validate()
+        except Exception as exc:
+            self._set_status(str(exc))
 
     @Slot(str)
     def requestNewDocument(self, kind: str) -> None:
@@ -800,14 +1085,10 @@ class RuleViewModel(QObject):
             self.openPath(payload)
         elif action == "new":
             self.newDocument(payload)
-        elif action == "config":
-            self.openConfig()
 
     @Slot()
     def reloadExternal(self) -> None:
-        if self._document.kind == "config":
-            self.openConfig()
-        elif self._document.path is not None:
+        if self._document.path is not None:
             self.openPath(str(self._document.path))
 
     @Slot(str)
@@ -817,7 +1098,7 @@ class RuleViewModel(QObject):
         issues = self._document.replace_source(source)
         self._issues = [issue.to_dict() for issue in issues]
         self.validationChanged.emit()
-        self.documentChanged.emit()
+        self._emit_document_reset()
         self.selectionChanged.emit()
 
     @Slot(str)
@@ -831,11 +1112,12 @@ class RuleViewModel(QObject):
             self._expanded_pointers.add(pointer)
         else:
             self._expanded_pointers.discard(pointer)
+        self.expandedChanged.emit()
 
     @Slot(bool)
     def setAllExpanded(self, expanded: bool) -> None:
         self._expanded_pointers = set(_container_pointers(self._document)) if expanded else set()
-        self.documentChanged.emit()
+        self.expandedChanged.emit()
 
     @Slot()
     def validate(self) -> None:
@@ -849,7 +1131,10 @@ class RuleViewModel(QObject):
     def setVisualValue(self, pointer: str, value: str) -> None:
         try:
             if self._document.set_value(pointer, value):
-                self.documentChanged.emit()
+                self.nodeDataChanged.emit(pointer, self._document.tree_node(pointer))
+                self.sourceChanged.emit()
+                self.formChanged.emit()
+                self.dirtyChanged.emit()
                 self.selectionChanged.emit()
                 self.validate()
         except Exception as exc:
@@ -868,7 +1153,10 @@ class RuleViewModel(QObject):
                 else repr(value)
             )
             if self._document.set_value(pointer, source):
-                self.documentChanged.emit()
+                self.nodeDataChanged.emit(pointer, self._document.tree_node(pointer))
+                self.sourceChanged.emit()
+                self.formChanged.emit()
+                self.dirtyChanged.emit()
                 self.selectionChanged.emit()
                 self.validate()
         except Exception as exc:
@@ -876,14 +1164,15 @@ class RuleViewModel(QObject):
 
     @Slot()
     def refreshDocument(self) -> None:
-        self.documentChanged.emit()
+        self._emit_document_reset()
         self.selectionChanged.emit()
 
     @Slot(str, str, str)
     def addChild(self, pointer: str, key: str, value: str) -> None:
         try:
             self._document.add_child(pointer, key, value)
-            self.documentChanged.emit()
+            self._selected_pointer = _pointer_for_child(pointer, key)
+            self._emit_structure_reset()
             self.validate()
         except Exception as exc:
             self._set_status(str(exc))
@@ -892,7 +1181,8 @@ class RuleViewModel(QObject):
     def addSuggested(self, key: str) -> None:
         try:
             self._document.add_suggested(self._selected_pointer, key)
-            self.documentChanged.emit()
+            self._selected_pointer = _pointer_for_child(self._selected_pointer, key)
+            self._emit_structure_reset()
             self.validate()
         except Exception as exc:
             self._set_status(str(exc))
@@ -904,8 +1194,8 @@ class RuleViewModel(QObject):
     @Slot()
     def addListItem(self) -> None:
         try:
-            self._document.add_list_item(self._selected_pointer)
-            self.documentChanged.emit()
+            self._selected_pointer = self._document.add_list_item(self._selected_pointer)
+            self._emit_structure_reset()
             self.validate()
         except Exception as exc:
             self._set_status(str(exc))
@@ -913,16 +1203,27 @@ class RuleViewModel(QObject):
     @Slot(str, int)
     def moveEntry(self, pointer: str, offset: int) -> None:
         try:
-            self._document.move_list_item(pointer, offset)
-            self.documentChanged.emit()
+            destination = self._document.move_list_item(pointer, offset)
+            if destination != pointer:
+                self._expanded_pointers = _swap_pointer_prefixes(
+                    self._expanded_pointers, pointer, destination
+                )
+                self._selected_pointer = _swap_pointer_prefix(
+                    self._selected_pointer, pointer, destination
+                )
+                self._emit_structure_reset()
         except Exception as exc:
             self._set_status(str(exc))
 
     @Slot(str)
     def removeEntry(self, pointer: str) -> None:
         try:
-            self._document.remove(pointer)
-            self.documentChanged.emit()
+            parent, was_list, index = self._document.remove(pointer)
+            self._expanded_pointers = _remove_pointer_prefix(
+                self._expanded_pointers, pointer, parent, index if was_list else None
+            )
+            self._selected_pointer = parent
+            self._emit_structure_reset()
             self.validate()
         except Exception as exc:
             self._set_status(str(exc))
@@ -932,26 +1233,8 @@ class RuleViewModel(QObject):
         if not self._document.dirty:
             self._set_status("没有实际修改 / No actual changes")
             return
-        if self._document.kind == "config":
-            try:
-                if self._document.validate():
-                    self._set_status("Resolve validation errors before saving")
-                    return
-                saved = self.config_service.save(self._document.source(), self._config_revision)
-                self._config_revision = saved.revision
-                self._document = RuleDocument.from_source(saved.source, kind="config")
-                self.rule_catalog.refresh()
-                self._set_status("Saved global configuration")
-                self.documentChanged.emit()
-            except Exception as exc:
-                if "revision" in str(exc).lower():
-                    self._set_status("配置文件已被外部修改 / Config changed externally")
-                    self.externalConflict.emit("config")
-                else:
-                    self._set_status(str(exc))
-            return
         asset = self.rule_catalog.asset(self._document.kind, self._rule_name)
-        if asset is None or not asset.writable:
+        if asset is None:
             self.saveNameRequested.emit()
             return
         try:
@@ -972,7 +1255,7 @@ class RuleViewModel(QObject):
             )
             self.rule_catalog.refresh()
             self._set_status(f"Saved {saved.rule.path}")
-            self.documentChanged.emit()
+            self._emit_document_reset()
         except Exception as exc:
             if "revision" in str(exc).lower():
                 self._set_status("规则文件已被外部修改 / Rule changed externally")
@@ -983,9 +1266,6 @@ class RuleViewModel(QObject):
     @Slot(str, bool)
     def saveToLibrary(self, name: str, overwrite: bool = False) -> None:
         try:
-            if self._document.kind == "config":
-                self._set_status("全局配置请通过 Config 命令保存")
-                return
             safe_name = Path(name.strip()).name
             if not safe_name.lower().endswith((".yaml", ".yml")):
                 safe_name += ".yaml"
@@ -1015,7 +1295,7 @@ class RuleViewModel(QObject):
             )
             self.rule_catalog.refresh()
             self._set_status(f"Saved {saved.rule.path}")
-            self.documentChanged.emit()
+            self._emit_document_reset()
         except Exception as exc:
             self._set_status(str(exc))
 
@@ -1034,8 +1314,36 @@ class RuleViewModel(QObject):
         self._set_status(
             f"从第 {inferred.row} 行推断 {len(inferred.columns)} 个列名 ({inferred.encoding})"
         )
-        self.documentChanged.emit()
+        self._emit_structure_reset()
         self.validate()
+
+    @Slot(str, result=list)
+    def treePath(self, pointer: str) -> list[int]:
+        try:
+            return self._document.tree_path(pointer)
+        except Exception:
+            return []
+
+    def _catalog_changed(self) -> None:
+        self.catalogChanged.emit()
+
+    @Slot()
+    def refreshCatalog(self) -> None:
+        self.rule_catalog.refresh()
+
+    def _emit_document_reset(self) -> None:
+        self.documentReset.emit()
+        self.documentChanged.emit()
+        self.sourceChanged.emit()
+        self.formChanged.emit()
+        self.metadataChanged.emit()
+        self.dirtyChanged.emit()
+        self.expandedChanged.emit()
+        self.selectionChanged.emit()
+
+    def _emit_structure_reset(self) -> None:
+        self.structureChanged.emit()
+        self._emit_document_reset()
 
     def _set_status(self, status: str) -> None:
         self._status = status
@@ -1055,7 +1363,6 @@ def _rule_template(kind: str) -> str:
             "type: hr\nref_column: REF_RESULT0\npred_column: ALGO_RESULT0\n"
             "methods: []\nthresholds: []\n"
         ),
-        "config": "rules_dir: ''\noffline_tools_path: ''\noffline_versions: {}\n",
     }
     return templates.get(kind, "{}\n")
 
@@ -1066,3 +1373,37 @@ def _container_pointers(document: RuleDocument) -> list[str]:
         for entry in document.visual_entries()
         if entry["kind"] in {"mapping", "list"}
     ]
+
+
+def _pointer_for_child(parent: str, token: str) -> str:
+    escaped = token.replace("~", "~0").replace("/", "~1")
+    return f"{parent}/{escaped}" if parent else f"/{escaped}"
+
+
+def _swap_pointer_prefix(value: str, first: str, second: str) -> str:
+    if value == first or value.startswith(first + "/"):
+        return second + value[len(first) :]
+    if value == second or value.startswith(second + "/"):
+        return first + value[len(second) :]
+    return value
+
+
+def _swap_pointer_prefixes(values: set[str], first: str, second: str) -> set[str]:
+    return {_swap_pointer_prefix(value, first, second) for value in values}
+
+
+def _remove_pointer_prefix(
+    values: set[str], removed: str, parent: str, removed_index: int | None
+) -> set[str]:
+    result: set[str] = set()
+    for value in values:
+        if value == removed or value.startswith(removed + "/"):
+            continue
+        if removed_index is not None and (value == parent or value.startswith(parent + "/")):
+            suffix = value[len(parent) :].lstrip("/")
+            tokens = suffix.split("/") if suffix else []
+            if tokens and tokens[0].isdigit() and int(tokens[0]) > removed_index:
+                tokens[0] = str(int(tokens[0]) - 1)
+                value = (parent + "/" if parent else "/") + "/".join(tokens)
+        result.add(value)
+    return result

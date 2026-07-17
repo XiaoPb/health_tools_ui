@@ -70,6 +70,7 @@ def test_config_service_scans_when_versions_are_empty() -> None:
     assert ConfigAction.SCAN_OFFLINE in api.actions
     assert result.config["offline_versions"]
     assert service.warning == ""
+    assert service.scan_attempted is True
 
 
 def test_config_service_explains_scan_failure() -> None:
@@ -80,3 +81,4 @@ def test_config_service_explains_scan_failure() -> None:
 
     assert result.config["offline_versions"] == {}
     assert "目录无效" in service.warning
+    assert service.scan_attempted is False

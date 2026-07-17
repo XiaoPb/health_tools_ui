@@ -6,11 +6,15 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_sub
 root = Path(SPECPATH).parent
 pyhuskarui_data, pyhuskarui_binaries, pyhuskarui_hidden = collect_all("pyhuskarui")
 health_data = collect_data_files("health_tools")
-health_hidden = collect_submodules(
-    "health_tools",
-    filter=lambda name: name != "health_tools.cli"
-    and not name.startswith("health_tools.commands"),
-)
+health_hidden = ["health_tools.config"]
+for package in (
+    "health_tools.api",
+    "health_tools.core",
+    "health_tools.models",
+    "health_tools.rules",
+    "health_tools.utils",
+):
+    health_hidden.extend(collect_submodules(package))
 
 a = Analysis(
     [str(root / "packaging" / "entrypoint.py")],

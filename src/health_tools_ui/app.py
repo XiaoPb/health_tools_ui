@@ -12,7 +12,8 @@ from PySide6.QtWidgets import QApplication
 from . import __version__
 from .config_service import HealthConfigService
 from .resources import RuleCatalogService
-from .viewmodels import AppViewModel, RuleViewModel
+from .rule_generation.viewmodel import RuleGeneratorViewModel
+from .viewmodels import AppViewModel, ConfigViewModel, RuleViewModel
 
 
 def run_app(argv: list[str] | None = None) -> int:
@@ -38,8 +39,13 @@ def run_app(argv: list[str] | None = None) -> int:
     rule_catalog = RuleCatalogService(engine)
     app_model = AppViewModel(settings, engine, rule_catalog, config_service)
     rule_model = RuleViewModel(engine, rule_catalog, config_service)
+    config_model = ConfigViewModel(engine, config_service)
+    generator_model = RuleGeneratorViewModel(engine, rule_catalog)
+    app.aboutToQuit.connect(generator_model.cleanup)
     engine.rootContext().setContextProperty("appModel", app_model)
     engine.rootContext().setContextProperty("ruleModel", rule_model)
+    engine.rootContext().setContextProperty("configModel", config_model)
+    engine.rootContext().setContextProperty("generatorModel", generator_model)
 
     qml_path = Path(__file__).parent / "qml" / "Main.qml"
     url = QUrl.fromLocalFile(str(qml_path))

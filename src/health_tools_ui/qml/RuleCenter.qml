@@ -5,9 +5,11 @@ import HuskarUI.Basic
 
 Item {
     id: root
+    objectName: "ruleCenter"
     property string pendingSaveName: ""
     property string pendingDiscardAction: ""
     property string pendingDiscardPayload: ""
+    property string workspaceMode: "library"
 
     Connections {
         target: ruleModel
@@ -25,6 +27,91 @@ Item {
     }
 
     ColumnLayout {
+        visible: root.workspaceMode === "library"
+        anchors.fill: parent
+        anchors.margins: 18
+        spacing: 12
+
+        RowLayout {
+            Layout.fillWidth: true
+            HusText { text: "规则库"; font.pixelSize: 20; font.weight: Font.DemiBold }
+            Item { Layout.fillWidth: true }
+            HusSelect {
+                id: newRuleKind
+                Layout.preferredWidth: 150
+                model: ruleModel.kinds.map(kind => ({ label: kind, value: kind }))
+                textRole: "label"
+                valueRole: "value"
+                currentIndex: 0
+            }
+            HusIconButton {
+                text: "新建规则"
+                type: HusButton.Type_Primary
+                iconSource: HusIcon.PlusOutlined
+                onClicked: {
+                    generatorModel.setKind(newRuleKind.currentValue);
+                    root.workspaceMode = "generator";
+                }
+            }
+            HusIconButton {
+                iconSource: HusIcon.ReloadOutlined
+                contentDescription: "刷新规则库"
+                onClicked: ruleModel.refreshCatalog()
+            }
+        }
+
+        HusTableView {
+            id: ruleLibrary
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            initModel: ruleModel.catalogEntries
+            columns: [
+                { title: "", dataIndex: "selection", selectionType: "radio", width: 48 },
+                { title: "类型", dataIndex: "type", width: 110 },
+                { title: "名称", dataIndex: "name", width: 260 },
+                { title: "来源", dataIndex: "sourceLabel", width: 100 },
+                { title: "覆盖状态", dataIndex: "overrideLabel", width: 130 },
+                { title: "权限", dataIndex: "writableLabel", width: 90 },
+                { title: "路径", dataIndex: "path", width: 420 }
+            ]
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            HusText {
+                Layout.fillWidth: true
+                text: ruleModel.catalogEntries.length + " 个规则"
+                color: HusTheme.Primary.colorTextSecondary
+            }
+            HusIconButton {
+                text: "打开选中规则"
+                type: HusButton.Type_Primary
+                iconSource: HusIcon.EditOutlined
+                enabled: ruleLibrary.checkedKeys.length > 0
+                onClicked: {
+                    root.workspaceMode = "editor";
+                    ruleModel.requestOpenPath(ruleLibrary.checkedKeys[0]);
+                }
+            }
+        }
+    }
+
+    RuleGenerator {
+        anchors.fill: parent
+        visible: root.workspaceMode === "generator"
+        onBackRequested: root.workspaceMode = "library"
+        onEditAdvanced: function(kind, name, source) {
+            ruleModel.loadDraft(kind, name, source);
+            root.workspaceMode = "editor";
+        }
+        onSavedRule: function(path) {
+            ruleModel.openPath(path);
+            root.workspaceMode = "editor";
+        }
+    }
+
+    ColumnLayout {
+        visible: root.workspaceMode === "editor"
         anchors.fill: parent
         anchors.margins: 18
         spacing: 10
@@ -34,6 +121,14 @@ Item {
             spacing: 6
             RowLayout {
                 Layout.fillWidth: true
+                HusIconButton {
+                    iconSource: HusIcon.AppstoreOutlined
+                    contentDescription: "返回规则库"
+                    onClicked: {
+                        if (ruleModel.dirty) discardLibraryModal.open();
+                        else root.workspaceMode = "library";
+                    }
+                }
                 HusText {
                     Layout.fillWidth: true
                     text: ruleModel.path === "" ? (appModel.locale === "zh_CN" ? "未保存规则" : "Unsaved rule") : ruleModel.path
@@ -107,12 +202,15 @@ Item {
             Layout.fillHeight: true
             tabType: HusTabView.Type_Card
             initModel: [
-                { key: "visual", title: appModel.texts.visual },
-                { key: "source", title: appModel.texts.source },
+                { key: "form", title: "结构化表单" },
+                { key: "visual", title: "高级结构" },
+                { key: "source", title: "高级 YAML" },
                 { key: "preview", title: appModel.texts.preview }
             ]
             contentDelegate: Loader {
-                sourceComponent: index === 0 ? visualEditor : index === 1 ? sourceEditor : previewEditor
+                sourceComponent: index === 0 ? formEditor
+                               : index === 1 ? visualEditor
+                               : index === 2 ? sourceEditor : previewEditor
             }
         }
 
@@ -130,6 +228,59 @@ Item {
                       : ruleModel.issues.map(item => "• " + (appModel.locale === "zh_CN" ? item.message_zh : item.message_en)).join("\n")
                 wrapMode: Text.Wrap
                 elide: Text.ElideRight
+            }
+        }
+    }
+
+    Component {
+        id: formEditor
+        ScrollView {
+            clip: true
+            ColumnLayout {
+                width: parent.width
+                spacing: 8
+                Repeater {
+                    model: ruleModel.formFields
+                    delegate: RowLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 54
+                        HusText { Layout.preferredWidth: 190; text: modelData.label; font.weight: Font.Medium }
+                        HusSwitch {
+                            visible: !modelData.container && modelData.valueType === "boolean"
+                            checked: Boolean(modelData.rawValue)
+                            onToggled: {
+                                if (checked !== Boolean(modelData.rawValue)) {
+                                    ruleModel.setVisualValue(modelData.pointer, checked ? "true" : "false");
+                                }
+                            }
+                        }
+                        HusInputNumber {
+                            visible: !modelData.container && modelData.valueType === "number"
+                            Layout.preferredWidth: 320
+                            value: Number(modelData.rawValue)
+                            onValueModified: {
+                                if (value !== Number(modelData.rawValue)) {
+                                    ruleModel.setVisualNumber(modelData.pointer, value);
+                                }
+                            }
+                        }
+                        HusInput {
+                            visible: !modelData.container && modelData.valueType === "text"
+                            Layout.fillWidth: true
+                            text: String(modelData.rawValue === null ? "" : modelData.rawValue)
+                            onEditingFinished: ruleModel.setVisualValue(modelData.pointer, text)
+                        }
+                        HusText {
+                            visible: modelData.container
+                            Layout.fillWidth: true
+                            text: modelData.value + " · 请在规则生成中心或高级结构中调整"
+                            color: HusTheme.Primary.colorTextSecondary
+                        }
+                        HusTag { visible: modelData.unsupported; text: "未知字段 · 原样保留"; presetColor: "orange" }
+                    }
+                }
+                Item { Layout.fillHeight: true }
             }
         }
     }
@@ -220,6 +371,16 @@ Item {
                             }
                             Connections {
                                 target: ruleModel
+                                function onNodeDataChanged(pointer, data) {
+                                    const path = ruleModel.treePath(pointer);
+                                    if (path.length > 0) ruleTree.setNodeData(ruleTree.index(path), data);
+                                }
+                                function onDocumentReset() {
+                                    Qt.callLater(function() {
+                                        ruleTree.selectedKey = ruleModel.selectedPointer;
+                                        ruleTree.expandForKeys(ruleModel.expandedPointers);
+                                    });
+                                }
                                 function onSelectionChanged() {
                                     if (ruleTree.selectedKey !== ruleModel.selectedPointer) {
                                         ruleTree.selectedKey = ruleModel.selectedPointer;
@@ -427,6 +588,19 @@ Item {
                 textArea.wrapMode: TextEdit.NoWrap
             }
         }
+    }
+
+    HusModal {
+        id: discardLibraryModal
+        title: "放弃未保存修改？"
+        description: "返回规则库会丢失当前尚未保存的修改。"
+        confirmText: "放弃修改"
+        cancelText: "继续编辑"
+        onConfirm: {
+            close();
+            root.workspaceMode = "library";
+        }
+        onCancel: close()
     }
 
     HusModal {

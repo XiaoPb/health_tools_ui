@@ -13,7 +13,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from .models import ValidationIssue
 from .rule_schema import RuleSchemaRegistry
 
-RULE_KINDS = ("chip", "parse", "classify", "convert", "evaluate", "config")
+RULE_KINDS = ("chip", "parse", "classify", "convert", "evaluate")
 
 REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "chip": ("version", "chip", "csv", "columns"),
@@ -151,10 +151,6 @@ class RuleDocument:
     def _upstream_validation(self) -> list[ValidationIssue]:
         if self.kind not in {"chip", "parse", "classify", "convert"}:
             return []
-        if self.variant == "patterns" or (
-            self.kind == "parse" and isinstance(self.data.get("patterns"), dict)
-        ):
-            return []
         try:
             from health_tools.api import ValidateRequest, run_validate
 
@@ -196,6 +192,25 @@ class RuleDocument:
         walk(self.data, [], 0)
         return entries
 
+    def form_fields(self) -> list[dict[str, Any]]:
+        schemas = {item.key: item for item in RuleSchemaRegistry.fields(self.kind, self.variant)}
+        result: list[dict[str, Any]] = []
+        for key, value in self.data.items():
+            schema = schemas.get(str(key))
+            entry = _entry([str(key)], key, value, 0)
+            result.append(
+                {
+                    **entry,
+                    "label": str(key).replace("_", " ").title(),
+                    "description": (
+                        schema.description if schema is not None else "未识别字段，将原样保留"
+                    ),
+                    "unsupported": schema is None,
+                    "container": isinstance(value, (dict, list)),
+                }
+            )
+        return result
+
     def tree_nodes(self) -> list[dict[str, Any]]:
         def nodes(value: Any, path: list[str]) -> list[dict[str, Any]]:
             items = (
@@ -220,6 +235,27 @@ class RuleDocument:
             return result
 
         return nodes(self.data, [])
+
+    def tree_path(self, pointer: str) -> list[int]:
+        current: Any = self.data
+        result: list[int] = []
+        for token in _tokens(pointer):
+            if isinstance(current, list):
+                index = int(token)
+            else:
+                keys = [str(key) for key in current]
+                index = keys.index(token)
+            result.append(index)
+            current = current[index] if isinstance(current, list) else current[token]
+        return result
+
+    def tree_node(self, pointer: str) -> dict[str, Any]:
+        node = self.node(pointer)
+        result = {**node, "title": f"{node['key']}: {node['value']}", "key": pointer}
+        value = self._resolve(pointer)
+        if isinstance(value, (dict, list)):
+            result["children"] = _tree_children(value, _tokens(pointer))
+        return result
 
     def node(self, pointer: str) -> dict[str, Any]:
         if not pointer:
@@ -257,7 +293,7 @@ class RuleDocument:
             raise ValueError(f"当前位置不支持字段: {key}")
         self.add_child(pointer, key, _dump_value(candidates[key].default))
 
-    def add_list_item(self, pointer: str) -> None:
+    def add_list_item(self, pointer: str) -> str:
         target = self._resolve(pointer)
         if not isinstance(target, list):
             raise ValueError("只能向列表添加项目")
@@ -265,17 +301,19 @@ class RuleDocument:
         template = schema.item_template if schema is not None else ""
         target.append(template if not isinstance(template, (dict, list)) else _clone(template))
         self.dirty = True
+        return _pointer([*_tokens(pointer), str(len(target) - 1)])
 
-    def move_list_item(self, pointer: str, offset: int) -> None:
+    def move_list_item(self, pointer: str, offset: int) -> str:
         parent, token = self._resolve_parent(pointer)
         if not isinstance(parent, list):
             raise ValueError("只能调整列表项目顺序")
         index = int(token)
         destination = index + offset
         if destination < 0 or destination >= len(parent):
-            return
+            return pointer
         parent[index], parent[destination] = parent[destination], parent[index]
         self.dirty = True
+        return _pointer([*_tokens(pointer)[:-1], str(destination)])
 
     def apply_inferred_columns(self, columns: list[str]) -> None:
         if self.kind == "parse":
@@ -318,13 +356,19 @@ class RuleDocument:
             raise ValueError("Children can only be added to mappings and lists")
         self.dirty = True
 
-    def remove(self, pointer: str) -> None:
+    def remove(self, pointer: str) -> tuple[str, bool, int | None]:
         parent, token = self._resolve_parent(pointer)
+        parent_pointer = _pointer(_tokens(pointer)[:-1]) if len(_tokens(pointer)) > 1 else ""
+        result: tuple[str, bool, int | None]
         if isinstance(parent, list):
-            del parent[int(token)]
+            index = int(token)
+            del parent[index]
+            result = (parent_pointer, True, index)
         else:
             del parent[token]
+            result = (parent_pointer, False, None)
         self.dirty = True
+        return result
 
     def save(self, target: Path | None = None, overwrite: bool = False) -> Path:
         destination = target or self.path
@@ -456,6 +500,19 @@ def _entry(path: list[str], key: Any, value: Any, depth: int) -> dict[str, Any]:
         if isinstance(value, (int, float))
         else "text",
     }
+
+
+def _tree_children(value: Any, path: list[str]) -> list[dict[str, Any]]:
+    items = value.items() if isinstance(value, dict) else enumerate(value)
+    result: list[dict[str, Any]] = []
+    for key, child in items:
+        child_path = [*path, str(key)]
+        entry = _entry(child_path, key, child, len(path))
+        node = {**entry, "title": f"{entry['key']}: {entry['value']}", "key": entry["pointer"]}
+        if isinstance(child, (dict, list)):
+            node["children"] = _tree_children(child, child_path)
+        result.append(node)
+    return result
 
 
 def _deduplicate_issues(issues: list[ValidationIssue]) -> list[ValidationIssue]:

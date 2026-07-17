@@ -160,6 +160,7 @@ class OfflineVersion:
             "label": f"{self.version} · {category}{default}{missing}",
             "category": self.category,
             "isDefault": self.is_default,
+            "executableAvailable": self.executable_available,
             "enabled": self.executable_available or allow_missing,
         }
 
@@ -170,20 +171,35 @@ class OfflineCatalogService:
         runner: Callable[[OfflineCatalogRequest], OfflineCatalogResult] = run_offline_catalog,
     ) -> None:
         self._runner = runner
+        self._versions: tuple[OfflineVersion, ...] = ()
+        self.error = ""
+        self.refresh()
+
+    def refresh(self) -> None:
+        self.error = ""
+        try:
+            values = self._runner(OfflineCatalogRequest()).versions
+            self._versions = tuple(
+                OfflineVersion(
+                    item.chip_name,
+                    item.category or "exclusive",
+                    item.version,
+                    item.is_default,
+                    item.exe_available,
+                )
+                for item in values
+            )
+        except Exception as exc:
+            self._versions = ()
+            self.error = str(exc)
 
     def chips(self) -> list[dict[str, Any]]:
-        values = sorted({item.chip_name for item in self._runner(OfflineCatalogRequest()).versions})
+        values = sorted({item.chip for item in self._versions})
         return [{"key": value, "value": value, "label": value, "enabled": True} for value in values]
 
     def versions(self, chip: str, *, allow_missing: bool = False) -> list[dict[str, Any]]:
-        values = self._runner(OfflineCatalogRequest(chip)).versions
         return [
-            OfflineVersion(
-                item.chip_name,
-                item.category or "exclusive",
-                item.version,
-                item.is_default,
-                item.exe_available,
-            ).to_dict(allow_missing=allow_missing)
-            for item in values
+            item.to_dict(allow_missing=allow_missing)
+            for item in self._versions
+            if item.chip == chip
         ]

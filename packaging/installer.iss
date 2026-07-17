@@ -1,5 +1,10 @@
 #define MyAppName "Health Tools UI"
-#define MyAppVersion "0.1.1"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.3.0"
+#endif
+#ifndef MyOutputBaseFilename
+  #define MyOutputBaseFilename "health-tools-ui-setup-0.3.0"
+#endif
 #define MyAppPublisher "XiaoPb"
 #define MyAppExeName "HealthToolsUI.exe"
 
@@ -11,7 +16,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Health Tools UI
 DefaultGroupName={#MyAppName}
 OutputDir=..\dist
-OutputBaseFilename=HealthToolsUI-Setup
+OutputBaseFilename={#MyOutputBaseFilename}
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -26,6 +31,9 @@ Source: "..\dist\HealthToolsUI\*"; DestDir: "{app}"; Flags: ignoreversion recurs
 [Dirs]
 Name: "{app}\offline"
 Name: "{app}\config"
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

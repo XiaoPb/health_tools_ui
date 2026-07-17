@@ -71,6 +71,8 @@ def build_request(command: str, values: Mapping[str, Any]) -> Any:
         value = values.get(name)
         if command == "config" and name == "action":
             value = ConfigAction(str(value or "show"))
+        elif command == "check" and name == "checks" and isinstance(value, (list, tuple)):
+            value = ",".join(str(part) for part in value if str(part)) or None
         elif name in PATH_FIELDS or (command == "validate" and name == "rule_file"):
             value = Path(str(value)) if value not in (None, "") else None
         elif name in TUPLE_FIELDS:

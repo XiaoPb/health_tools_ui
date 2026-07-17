@@ -47,9 +47,35 @@ def test_latest_offline_fields_are_exposed() -> None:
     assert fields_by_name["settle_timeout"].default == 10
 
 
+def test_check_and_plot_expose_complete_guided_choices() -> None:
+    catalog = catalog_by_name()
+    check = {field.name: field for field in catalog["check"].fields}["checks"]
+    plot = {field.name: field for field in catalog["plot"].fields}
+
+    assert check.multiple is True
+    assert check.default == ["range", "ipd", "frame", "center", "acc"]
+    assert [choice.value for choice in check.choices] == [
+        "range",
+        "ipd",
+        "frame",
+        "center",
+        "acc",
+    ]
+    assert [choice.value for choice in plot["plot_type"].choices] == [
+        "time",
+        "freq",
+        "stft",
+        "psd",
+        "ac",
+        "fft",
+        "both",
+    ]
+    assert [choice.value for choice in plot["psd_acc"].choices] == ["axis", "rms"]
+
+
 def test_ui_only_imports_health_tools_public_api() -> None:
     source_root = Path(__file__).parents[1] / "src" / "health_tools_ui"
-    sources = "\n".join(path.read_text(encoding="utf-8") for path in source_root.glob("*.py"))
+    sources = "\n".join(path.read_text(encoding="utf-8") for path in source_root.rglob("*.py"))
     forbidden = (
         "health_tools.cli",
         "health_tools.commands",
