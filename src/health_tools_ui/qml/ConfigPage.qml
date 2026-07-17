@@ -6,6 +6,15 @@ import HuskarUI.Basic
 Item {
     id: root
 
+    Component {
+        id: tableTextCell
+        HusText {
+            text: String(cellData === undefined || cellData === null ? "" : cellData)
+            elide: Text.ElideMiddle
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 20
@@ -35,9 +44,11 @@ Item {
     Component {
         id: pathsPanel
         ScrollView {
+            id: pathsScroll
             clip: true
+            contentWidth: availableWidth
             ColumnLayout {
-                width: parent.width
+                width: pathsScroll.availableWidth
                 spacing: 12
                 RowLayout {
                     Layout.fillWidth: true
@@ -69,10 +80,10 @@ Item {
                     initModel: configModel.offlineVersions
                     columns: [
                         { title: "", dataIndex: "selection", selectionType: "radio", width: 48 },
-                        { title: "芯片", dataIndex: "chip", width: 150 },
-                        { title: "分类", dataIndex: "category", width: 180 },
-                        { title: "版本", dataIndex: "version", width: 260 },
-                        { title: "默认", dataIndex: "defaultLabel", width: 100 }
+                        { title: "芯片", dataIndex: "chip", delegate: tableTextCell, width: 150 },
+                        { title: "分类", dataIndex: "category", delegate: tableTextCell, width: 180 },
+                        { title: "版本", dataIndex: "version", delegate: tableTextCell, width: 260 },
+                        { title: "默认", dataIndex: "defaultLabel", delegate: tableTextCell, width: 100 }
                     ]
                 }
                 RowLayout {

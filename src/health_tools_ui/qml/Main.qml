@@ -16,6 +16,9 @@ HusWindow {
 
     function menuModel() {
         return [
+            { key: "analyze:hr", label: appModel.locale === "zh_CN" ? "心率分析" : "Heart rate analysis", iconSource: HusIcon.HeartOutlined },
+            { key: "analyze:spo2", label: appModel.locale === "zh_CN" ? "血氧分析" : "SpO2 analysis", iconSource: HusIcon.LineChartOutlined },
+            { key: "analysis-divider", type: "divider", label: "" },
             {
                 key: "data",
                 label: appModel.locale === "zh_CN" ? "数据处理" : "Data processing",
@@ -66,9 +69,10 @@ HusWindow {
             mainMenu.clear();
             const model = window.menuModel();
             for (let index = 0; index < model.length; index++) mainMenu.append(model[index]);
+            mainMenu.gotoMenu(appModel.currentMenuKey);
         }
         function onCurrentCommandChanged() {
-            mainMenu.gotoMenu("cmd:" + appModel.currentCommand.name);
+            mainMenu.gotoMenu(appModel.currentMenuKey);
         }
     }
 
@@ -122,7 +126,13 @@ HusWindow {
                         showEdge: false
                         showToolTip: true
                         onClickMenu: function(deep, key, keyPath, data) {
-                            if (key.indexOf("cmd:") === 0) {
+                            if (key === "analyze:hr") {
+                                appModel.selectAnalysis("hr");
+                                window.currentPage = "command";
+                            } else if (key === "analyze:spo2") {
+                                appModel.selectAnalysis("spo2");
+                                window.currentPage = "command";
+                            } else if (key.indexOf("cmd:") === 0) {
                                 appModel.selectCommand(key.substring(4));
                                 window.currentPage = "command";
                             } else if (key === "rules") {

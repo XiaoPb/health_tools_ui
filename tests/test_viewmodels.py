@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+from types import MappingProxyType
 
 from health_tools.api import ConfigAction, ConfigResult, RequestValidationError, RuleCatalogResult
 from PySide6.QtCore import QSettings
 from PySide6.QtTest import QSignalSpy
 
 from health_tools_ui.config_service import HealthConfigService
+from health_tools_ui.models import JobRecord, JobRequest
 from health_tools_ui.resources import RuleCatalogService
 from health_tools_ui.viewmodels import AppViewModel, ConfigViewModel, RuleViewModel
 
@@ -43,6 +45,27 @@ class StubConfigService:
         return ConfigResult(
             ConfigAction.SET_OFFLINE_PATH,
             {"offline_tools_path": path},
+        )
+
+
+class ImmutableConfigService:
+    warning = ""
+
+    def show(self) -> ConfigResult:
+        versions = MappingProxyType(
+            {
+                "gh3220": MappingProxyType(
+                    {
+                        "versions": MappingProxyType({"exclusive": ("v1", "v2")}),
+                        "default": "v2",
+                    }
+                )
+            }
+        )
+        return ConfigResult(
+            ConfigAction.SHOW,
+            {"offline_versions": versions},
+            source="offline_versions: {}\n",
         )
 
 
@@ -124,6 +147,13 @@ def test_config_reloads_from_user_file_when_opened(qapp, tmp_path) -> None:
 
     assert model.rulesDir == "second"
     assert model.dirty is False
+
+
+def test_config_versions_accept_immutable_api_collections(qapp) -> None:
+    model = ConfigViewModel(config_service=ImmutableConfigService())
+
+    assert [row["version"] for row in model.offlineVersions] == ["v1", "v2"]
+    assert model.offlineVersions[1]["defaultLabel"] == "默认"
 
 
 def test_config_save_rejects_external_changes(qapp, tmp_path) -> None:
@@ -218,3 +248,53 @@ def test_command_fields_hide_internal_offline_action_and_filter_plot_options(
     fft_fields = {field["name"] for field in model.currentFields}
     assert "freq_range" in fft_fields
     assert "psd_acc" not in fft_fields
+
+
+def test_analysis_presets_lock_type_and_filter_offline_fields(qapp, tmp_path) -> None:
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    model = AppViewModel(settings)
+
+    model.selectAnalysis("hr")
+    hr_fields = {field["name"] for field in model.currentFields}
+    assert model.currentMenuKey == "analyze:hr"
+    assert model.currentCommand["title"] == "心率分析"
+    assert model.value("analysis_type") == "hr"
+    assert "analysis_type" not in hr_fields
+    assert {"offline_version", "allow_offline"} <= hr_fields
+    hr_rule = next(field for field in model.currentFields if field["name"] == "rule_file")
+    assert all("spo2" not in choice["value"] for choice in hr_rule["choices"])
+
+    model.selectAnalysis("spo2")
+    spo2_fields = {field["name"] for field in model.currentFields}
+    assert model.currentMenuKey == "analyze:spo2"
+    assert model.currentCommand["title"] == "血氧分析"
+    assert model.value("analysis_type") == "spo2"
+    assert "offline_version" not in spo2_fields
+    assert "allow_offline" not in spo2_fields
+    spo2_rule = next(field for field in model.currentFields if field["name"] == "rule_file")
+    assert all("analysis_hr" not in choice["value"] for choice in spo2_rule["choices"])
+
+
+def test_analysis_history_restores_matching_menu(qapp, tmp_path) -> None:
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    model = AppViewModel(settings)
+    record = JobRecord(JobRequest("analyze", [], {"analysis_type": "spo2"}))
+    model.queue.records.insert(0, record)
+
+    model.restoreJob(record.request.id)
+
+    assert model.currentMenuKey == "analyze:spo2"
+    assert model.currentCommand["title"] == "血氧分析"
+
+
+def test_analysis_template_opens_builtin_as_unsaved_draft(qapp) -> None:
+    catalog = RuleCatalogService()
+    model = RuleViewModel(rule_catalog=catalog)
+
+    model.newDocument("analysis:hr")
+
+    assert model.kind == "analysis"
+    assert model.path == ""
+    assert model.dirty is True
+    assert "type: hr" in model.source
+    assert model.issues == []

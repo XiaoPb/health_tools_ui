@@ -45,3 +45,17 @@ def test_offline_catalog_maps_public_versions() -> None:
     missing = service.versions("gh3220", allow_missing=True)[1]
     assert missing["enabled"] is True
     assert missing["executableAvailable"] is False
+
+
+def test_rule_catalog_classifies_analysis_rules_by_type(qapp, tmp_path: Path) -> None:
+    path = tmp_path / "analysis" / "custom_spo2.yaml"
+    variant = RuleVariantInfo(RuleSource.USER, path, True, "r1")
+    info = RuleInfo(RuleType.ANALYSIS, path.name, RuleSource.USER, path, True, False, (variant,))
+    source = "type: spo2\ncolumns: {}\ndetectors: [integrity]\ncauses: []\n"
+    service = RuleCatalogService(
+        list_runner=lambda _request: RuleCatalogResult((info,)),
+        read_runner=lambda _request: RuleDocumentResult(info, source, "r1"),
+    )
+
+    assert service.choices("analysis", variant="analysis_hr") == []
+    assert service.choices("analysis", variant="analysis_spo2")[0]["value"] == path.name

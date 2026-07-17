@@ -9,7 +9,7 @@ from health_tools_ui.catalog import COMMAND_ORDER, REQUEST_TYPES, build_catalog,
 def test_catalog_contains_every_api_operation() -> None:
     catalog = build_catalog()
     assert tuple(spec.name for spec in catalog) == COMMAND_ORDER
-    assert len(catalog) == 13
+    assert len(catalog) == 14
 
 
 def test_catalog_fields_match_public_request_models() -> None:
@@ -45,6 +45,24 @@ def test_latest_offline_fields_are_exposed() -> None:
     assert fields_by_name["ppg_offset"].default == 0
     assert fields_by_name["ppg_maps"].multiple is True
     assert fields_by_name["settle_timeout"].default == 10
+
+
+def test_analyze_fields_expose_guided_choices_and_rule_sources() -> None:
+    fields_by_name = {field.name: field for field in catalog_by_name()["analyze"].fields}
+
+    assert [choice.value for choice in fields_by_name["analysis_type"].choices] == [
+        "hr",
+        "spo2",
+    ]
+    assert [choice.value for choice in fields_by_name["scene"].choices] == [
+        "auto",
+        "static",
+        "dynamic",
+    ]
+    assert fields_by_name["rule_file"].choice_provider == "analysis_current"
+    assert fields_by_name["offline_version"].choice_provider == "analysis_offline_versions"
+    assert fields_by_name["focus"].multiple is True
+    assert fields_by_name["sample_rate"].kind.value == "number"
 
 
 def test_check_and_plot_expose_complete_guided_choices() -> None:

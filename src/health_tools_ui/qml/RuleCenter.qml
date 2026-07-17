@@ -11,6 +11,15 @@ Item {
     property string pendingDiscardPayload: ""
     property string workspaceMode: "library"
 
+    Component {
+        id: tableTextCell
+        HusText {
+            text: String(cellData === undefined || cellData === null ? "" : cellData)
+            elide: Text.ElideMiddle
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
     Connections {
         target: ruleModel
         function onSaveNameRequested() { saveNameModal.open(); }
@@ -38,8 +47,8 @@ Item {
             Item { Layout.fillWidth: true }
             HusSelect {
                 id: newRuleKind
-                Layout.preferredWidth: 150
-                model: ruleModel.kinds.map(kind => ({ label: kind, value: kind }))
+                Layout.preferredWidth: 210
+                model: ruleModel.creationOptions
                 textRole: "label"
                 valueRole: "value"
                 currentIndex: 0
@@ -49,8 +58,13 @@ Item {
                 type: HusButton.Type_Primary
                 iconSource: HusIcon.PlusOutlined
                 onClicked: {
-                    generatorModel.setKind(newRuleKind.currentValue);
-                    root.workspaceMode = "generator";
+                    if (newRuleKind.currentValue.indexOf("analysis:") === 0) {
+                        ruleModel.requestNewDocument(newRuleKind.currentValue);
+                        root.workspaceMode = "editor";
+                    } else {
+                        generatorModel.setKind(newRuleKind.currentValue);
+                        root.workspaceMode = "generator";
+                    }
                 }
             }
             HusIconButton {
@@ -67,12 +81,12 @@ Item {
             initModel: ruleModel.catalogEntries
             columns: [
                 { title: "", dataIndex: "selection", selectionType: "radio", width: 48 },
-                { title: "类型", dataIndex: "type", width: 110 },
-                { title: "名称", dataIndex: "name", width: 260 },
-                { title: "来源", dataIndex: "sourceLabel", width: 100 },
-                { title: "覆盖状态", dataIndex: "overrideLabel", width: 130 },
-                { title: "权限", dataIndex: "writableLabel", width: 90 },
-                { title: "路径", dataIndex: "path", width: 420 }
+                { title: "类型", dataIndex: "type", delegate: tableTextCell, width: 110 },
+                { title: "名称", dataIndex: "name", delegate: tableTextCell, width: 260 },
+                { title: "来源", dataIndex: "sourceLabel", delegate: tableTextCell, width: 100 },
+                { title: "覆盖状态", dataIndex: "overrideLabel", delegate: tableTextCell, width: 130 },
+                { title: "权限", dataIndex: "writableLabel", delegate: tableTextCell, width: 90 },
+                { title: "路径", dataIndex: "path", delegate: tableTextCell, width: 420 }
             ]
         }
 

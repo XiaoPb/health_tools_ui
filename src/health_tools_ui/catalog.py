@@ -4,6 +4,7 @@ from dataclasses import MISSING, fields
 from typing import Any
 
 from health_tools.api import (
+    AnalyzeRequest,
     CheckRequest,
     ClassifyRequest,
     ConfigRequest,
@@ -23,6 +24,7 @@ from .models import CommandSpec, FieldChoice, FieldKind, FieldSpec
 
 COMMAND_ORDER = (
     "parse",
+    "analyze",
     "plot",
     "classify",
     "convert",
@@ -38,6 +40,7 @@ COMMAND_ORDER = (
 )
 REQUEST_TYPES = {
     "parse": ParseRequest,
+    "analyze": AnalyzeRequest,
     "plot": PlotRequest,
     "classify": ClassifyRequest,
     "convert": ConvertRequest,
@@ -53,6 +56,7 @@ REQUEST_TYPES = {
 }
 COMMAND_META: dict[str, tuple[str, str, str, str]] = {
     "parse": ("数据处理", "日志解析 Parse", "files", "按规则将日志解析为 CSV"),
+    "analyze": ("分析评估", "数据分析 Analyze", "files", "生成结构化诊断、证据图和分析报告"),
     "plot": ("分析评估", "数据绘图 Plot", "images", "生成时域图与频谱图"),
     "classify": ("数据处理", "数据分类 Classify", "files", "按规则复制、移动或链接文件"),
     "convert": ("数据处理", "格式转换 Convert", "csv", "转换或合并 CSV 数据"),
@@ -68,6 +72,14 @@ COMMAND_META: dict[str, tuple[str, str, str, str]] = {
 }
 PRIMARY_FIELDS = {
     "parse": {"input_path", "output_path", "rule_file", "chip_name"},
+    "analyze": {
+        "input_path",
+        "output_path",
+        "rule_file",
+        "chip_name",
+        "scene",
+        "report",
+    },
     "plot": {"input_path", "output_path", "plot_type", "channels", "sample_rate"},
     "classify": {"input_path", "output_path", "rule_file", "mode"},
     "convert": {"input_path", "output_path", "rule_file", "chip_name", "init_rule"},
@@ -82,7 +94,7 @@ PRIMARY_FIELDS = {
     "check": {"input_path", "chip_name", "checks", "output_path", "sort_report"},
 }
 PATH_FIELDS = {"input_path", "output_path", "rule_file", "target", "report_path", "sort_output"}
-TUPLE_FIELDS = {"extend_files", "ppg_maps"}
+TUPLE_FIELDS = {"extend_files", "ppg_maps", "focus"}
 MULTI_CHOICE_FIELDS = {("check", "checks")}
 INTEGER_FIELDS = {
     "sample_rate",
@@ -144,8 +156,12 @@ BOOLEAN_FIELDS = {
     "do_list",
     "acc_axis",
     "sort_report",
+    "allow_offline",
 }
 CHOICES: dict[tuple[str, str], tuple[Any, ...]] = {
+    ("analyze", "analysis_type"): ("hr", "spo2"),
+    ("analyze", "scene"): ("auto", "static", "dynamic"),
+    ("analyze", "report"): ("markdown", "pptx", "all"),
     ("plot", "plot_type"): ("time", "freq", "stft", "psd", "ac", "fft", "both"),
     ("plot", "fmt"): ("png", "svg", "pdf"),
     ("plot", "baseline_method"): ("mean", "median"),
@@ -163,6 +179,8 @@ CHOICES: dict[tuple[str, str], tuple[Any, ...]] = {
     ),
 }
 CHOICE_PROVIDERS = {
+    ("analyze", "rule_file"): "analysis_current",
+    ("analyze", "offline_version"): "analysis_offline_versions",
     ("parse", "rule_file"): "parse",
     ("classify", "rule_file"): "classify",
     ("classify", "extend_files"): "classify_patterns",
@@ -187,9 +205,22 @@ FIELD_HELP = {
     "checks": "默认执行范围、Ipd、帧完整性、数据居中和 ACC 五项检查",
     "channels": "通道名；AC 可用分号分隔多组通道",
     "psd_acc": "PSD 的 ACC 聚合方式：分轴或 RMS",
+    "scene": "分析场景；auto 自动判断静止或动态",
+    "focus": "强制执行深度分析的目录 glob，可添加多项",
+    "report": "生成 Markdown、PPTX 或两种报告",
+    "offline_version": "心率证据不足时使用的离线算法版本",
+    "allow_offline": "证据不足时允许自动执行离线 PSD 分析",
 }
 
 CHOICE_LABELS: dict[tuple[str, str, Any], str] = {
+    ("analyze", "analysis_type", "hr"): "心率",
+    ("analyze", "analysis_type", "spo2"): "血氧",
+    ("analyze", "scene", "auto"): "自动判断",
+    ("analyze", "scene", "static"): "静止",
+    ("analyze", "scene", "dynamic"): "动态",
+    ("analyze", "report", "markdown"): "Markdown",
+    ("analyze", "report", "pptx"): "PPTX",
+    ("analyze", "report", "all"): "全部",
     ("plot", "plot_type", "time"): "时域",
     ("plot", "plot_type", "freq"): "频域",
     ("plot", "plot_type", "stft"): "STFT",
@@ -220,6 +251,8 @@ def _default(item: Any) -> Any:
 def _kind(command: str, name: str) -> FieldKind:
     if (command, name) in CHOICES:
         return FieldKind.CHOICE
+    if command == "analyze" and name == "sample_rate":
+        return FieldKind.NUMBER
     if name in PATH_FIELDS:
         return FieldKind.PATH
     if name in BOOLEAN_FIELDS:

@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "health-tools-ui"
-version = "0.3.0"
+version = "0.3.1"
 description = "A PyHuskarUI desktop interface for ghealth-tools"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "XiaoPb" }]
 dependencies = [
-    "ghealth-tools==0.4.58",
+    "ghealth-tools==0.5.1",
     "platformdirs>=4.2,<5",
     "psutil>=6,<8",
     "pyhuskarui==0.6.1.0",
@@ -34,11 +34,6 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/health_tools_ui"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/health_tools_ui/qml" = "health_tools_ui/qml"
-"src/health_tools_ui/i18n" = "health_tools_ui/i18n"
-"src/health_tools_ui/assets" = "health_tools_ui/assets"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

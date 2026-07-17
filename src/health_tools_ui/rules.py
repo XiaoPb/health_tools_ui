@@ -13,7 +13,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from .models import ValidationIssue
 from .rule_schema import RuleSchemaRegistry
 
-RULE_KINDS = ("chip", "parse", "classify", "convert", "evaluate")
+RULE_KINDS = ("chip", "parse", "classify", "convert", "evaluate", "analysis")
 
 REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "chip": ("version", "chip", "csv", "columns"),
@@ -21,6 +21,7 @@ REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "classify": ("version", "structure"),
     "convert": ("version",),
     "evaluate": ("type", "ref_column", "pred_column"),
+    "analysis": ("version", "type", "columns", "detectors", "causes"),
     "config": (),
 }
 
@@ -43,6 +44,8 @@ def detect_rule_kind(path: Path | None, data: Any) -> str:
             return "config"
     if isinstance(data, dict):
         keys = set(data)
+        if {"type", "columns", "detectors", "causes"} <= keys:
+            return "analysis"
         if {"chip", "csv", "columns"} <= keys:
             return "chip"
         if {"regex", "columns"} <= keys:
@@ -149,7 +152,7 @@ class RuleDocument:
         return _deduplicate_issues(issues)
 
     def _upstream_validation(self) -> list[ValidationIssue]:
-        if self.kind not in {"chip", "parse", "classify", "convert"}:
+        if self.kind not in {"chip", "parse", "classify", "convert", "analysis"}:
             return []
         try:
             from health_tools.api import ValidateRequest, run_validate

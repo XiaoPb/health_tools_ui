@@ -102,6 +102,17 @@ class RuleCatalogService(QObject):
                     variant = "patterns"
             except Exception:
                 pass
+        elif info.rule_type == RuleType.ANALYSIS:
+            try:
+                document = self._read_runner(
+                    RuleReadRequest(info.rule_type, info.name, info.source)
+                )
+                data = YAML(typ="safe").load(document.source) or {}
+                analysis_type = str(data.get("type", ""))
+                if analysis_type in {"hr", "spo2", "other"}:
+                    variant = f"analysis_{analysis_type}"
+            except Exception:
+                pass
         return RuleAsset(
             info.rule_type.value,
             variant,
@@ -114,7 +125,12 @@ class RuleCatalogService(QObject):
         )
 
     def choices(
-        self, provider: str, *, absolute: bool = False, patterns_only: bool = False
+        self,
+        provider: str,
+        *,
+        absolute: bool = False,
+        patterns_only: bool = False,
+        variant: str | None = None,
     ) -> list[dict[str, Any]]:
         selected = (
             [asset for asset in self._assets if asset.kind != "chip"]
@@ -123,6 +139,8 @@ class RuleCatalogService(QObject):
         )
         if patterns_only:
             selected = [asset for asset in selected if asset.variant == "patterns"]
+        if variant:
+            selected = [asset for asset in selected if asset.variant == variant]
         return [asset.to_dict(absolute=absolute or provider == "all_rules") for asset in selected]
 
     def asset(self, kind: str, name: str) -> RuleAsset | None:

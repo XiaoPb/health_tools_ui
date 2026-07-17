@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,16 @@ ZH_FIELD_LABELS = {
     "ppg_offset": "PPG 通道偏移",
     "ppg_maps": "PPG 通道映射",
     "settle_timeout": "输出稳定等待时间",
+    "analysis_type": "分析类型",
+    "scene": "分析场景",
+    "ref_column": "参考值列",
+    "pred_column": "算法结果列",
+    "timestamp_column": "时间戳列",
+    "focus": "强制深度分析目录",
+    "report": "报告格式",
+    "offline_version": "离线算法版本",
+    "allow_offline": "允许自动离线分析",
+    "workers": "并行工作数",
     "action": "配置操作",
     "value": "配置值",
     "force": "强制覆盖",
@@ -157,8 +168,7 @@ class AppViewModel(QObject):
         self.offline_catalog = OfflineCatalogService()
         self._offline_path = self._discover_offline_path()
         self._offline_scan_attempted = bool(
-            getattr(self.config_service, "scan_attempted", False)
-            or self.offline_catalog.chips()
+            getattr(self.config_service, "scan_attempted", False) or self.offline_catalog.chips()
         )
         self._status = self.config_service.warning or TEXTS[self._locale]["ready"]
         self._result: dict[str, Any] = {"kind": "none", "title": "", "items": []}
@@ -179,15 +189,39 @@ class AppViewModel(QObject):
     @Property(dict, notify=currentCommandChanged)
     def currentCommand(self) -> dict[str, Any]:
         result = self._current.to_dict()
+        if self._current.name == "analyze":
+            analysis_type = str(self._values.get("analysis_type") or "hr")
+            if self._locale == "zh_CN":
+                result["title"] = "心率分析" if analysis_type == "hr" else "血氧分析"
+            else:
+                result["title"] = (
+                    "Heart rate analysis" if analysis_type == "hr" else "SpO2 analysis"
+                )
         if self._locale == "en":
-            result["title"] = self._current.name.title()
+            if self._current.name != "analyze":
+                result["title"] = self._current.name.title()
             result["help"] = f"Configure and run the ghealth-tools {self._current.name} command."
         return result
+
+    @Property(str, notify=currentCommandChanged)
+    def currentMenuKey(self) -> str:
+        if self._current.name == "analyze":
+            return f"analyze:{self._values.get('analysis_type') or 'hr'}"
+        return f"cmd:{self._current.name}"
 
     @Property(list, notify=currentCommandChanged)
     def currentFields(self) -> list[dict[str, Any]]:
         fields: list[dict[str, Any]] = []
         for field in self._current.fields:
+            if self._current.name == "analyze":
+                analysis_type = str(self._values.get("analysis_type") or "hr")
+                if field.name == "analysis_type":
+                    continue
+                if analysis_type == "spo2" and field.name in {
+                    "offline_version",
+                    "allow_offline",
+                }:
+                    continue
             if self._current.name == "config":
                 action = str(self._values.get("action") or "show")
                 if field.name == "force" and action != "init":
@@ -341,6 +375,22 @@ class AppViewModel(QObject):
         self._reset_values()
         self.currentCommandChanged.emit()
 
+    @Slot(str)
+    def selectAnalysis(self, analysis_type: str) -> None:
+        if analysis_type not in {"hr", "spo2"}:
+            return
+        already_selected = (
+            self._current.name == "analyze" and self._values.get("analysis_type") == analysis_type
+        )
+        if already_selected:
+            return
+        self._current = self._by_name["analyze"]
+        self._reset_values()
+        self._values["analysis_type"] = analysis_type
+        self._revision += 1
+        self.valuesChanged.emit()
+        self.currentCommandChanged.emit()
+
     @Slot(str, result=bool)
     def selectBySearch(self, query: str) -> bool:
         normalized = query.strip().lower()
@@ -368,6 +418,8 @@ class AppViewModel(QObject):
         if self._current.name == "config" and name == "action":
             self.currentCommandChanged.emit()
         if self._current.name == "plot" and name == "plot_type":
+            self.currentCommandChanged.emit()
+        if self._current.name == "analyze" and name == "chip_name":
             self.currentCommandChanged.emit()
         if self._current.name == "offline" and name == "chip_name":
             self._offline_selected_versions = []
@@ -575,6 +627,11 @@ class AppViewModel(QObject):
             return
         self._current = self._by_name[record.request.command]
         self._values = dict(record.request.values)
+        if self._current.name == "analyze":
+            analysis_type = str(self._values.get("analysis_type") or "hr")
+            self._values["analysis_type"] = (
+                analysis_type if analysis_type in {"hr", "spo2"} else "hr"
+            )
         self._revision += 1
         self.currentCommandChanged.emit()
         self.valuesChanged.emit()
@@ -616,6 +673,12 @@ class AppViewModel(QObject):
         self.currentCommandChanged.emit()
 
     def _choices_for_provider(self, provider: str) -> list[dict[str, Any]]:
+        if provider == "analysis_current":
+            analysis_type = str(self._values.get("analysis_type") or "hr")
+            return self.rule_catalog.choices("analysis", variant=f"analysis_{analysis_type}")
+        if provider == "analysis_offline_versions":
+            chip = str(self._values.get("chip_name") or "")
+            return self.offline_catalog.versions(chip) if chip else []
         if provider == "offline_chips":
             rule_chips = {item["value"]: item for item in self.rule_catalog.choices("chip")}
             result: list[dict[str, Any]] = []
@@ -740,19 +803,19 @@ class ConfigViewModel(QObject):
     def offlineVersions(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         configured = self._config.get("offline_versions", {})
-        if not isinstance(configured, dict):
+        if not isinstance(configured, Mapping):
             return rows
         for chip, chip_data in configured.items():
-            if not isinstance(chip_data, dict):
+            if not isinstance(chip_data, Mapping):
                 continue
             default = str(chip_data.get("default", ""))
             categories = chip_data.get("versions", {})
-            if isinstance(categories, list):
+            if isinstance(categories, Sequence) and not isinstance(categories, (str, bytes)):
                 categories = {"exclusive": categories}
-            if not isinstance(categories, dict):
+            if not isinstance(categories, Mapping):
                 continue
             for category, versions in categories.items():
-                if not isinstance(versions, list):
+                if not isinstance(versions, Sequence) or isinstance(versions, (str, bytes)):
                     continue
                 rows.extend(
                     {
@@ -930,6 +993,17 @@ class RuleViewModel(QObject):
     def kinds(self) -> list[str]:
         return list(RULE_KINDS)
 
+    @Property(list, constant=True)
+    def creationOptions(self) -> list[dict[str, str]]:
+        return [
+            {"label": kind, "value": kind, "mode": "generator"}
+            for kind in RULE_KINDS
+            if kind != "analysis"
+        ] + [
+            {"label": "analysis · 心率模板", "value": "analysis:hr", "mode": "template"},
+            {"label": "analysis · 血氧模板", "value": "analysis:spo2", "mode": "template"},
+        ]
+
     @Property(list, notify=documentReset)
     def entries(self) -> list[dict[str, Any]]:
         return self._document.visual_entries()
@@ -1044,6 +1118,10 @@ class RuleViewModel(QObject):
 
     @Slot(str)
     def newDocument(self, kind: str) -> None:
+        if kind == "analysis" or kind.startswith("analysis:"):
+            analysis_type = kind.partition(":")[2] or "hr"
+            self._new_analysis_document(analysis_type)
+            return
         template = _rule_template(kind)
         self._document = RuleDocument.from_source(template, kind=kind)
         self._rule_revision = None
@@ -1053,6 +1131,25 @@ class RuleViewModel(QObject):
         self._set_status(f"New {kind} rule")
         self._emit_document_reset()
         self.validate()
+
+    def _new_analysis_document(self, analysis_type: str) -> None:
+        if analysis_type not in {"hr", "spo2"}:
+            self._set_status(f"Unsupported analysis type: {analysis_type}")
+            return
+        try:
+            name = f"analysis_{analysis_type}.yaml"
+            result = run_read_rule(RuleReadRequest(RuleType.ANALYSIS, name, RuleSource.BUILTIN))
+            self._document = RuleDocument.from_source(result.source, kind="analysis")
+            self._document.dirty = True
+            self._rule_revision = None
+            self._rule_name = ""
+            self._selected_pointer = ""
+            self._expanded_pointers = set(_container_pointers(self._document)[:2])
+            self._set_status(f"New {analysis_type} analysis rule from built-in template")
+            self._emit_document_reset()
+            self.validate()
+        except Exception as exc:
+            self._set_status(str(exc))
 
     @Slot(str, str, str)
     def loadDraft(self, kind: str, name: str, source: str) -> None:
@@ -1362,6 +1459,12 @@ def _rule_template(kind: str) -> str:
         "evaluate": (
             "type: hr\nref_column: REF_RESULT0\npred_column: ALGO_RESULT0\n"
             "methods: []\nthresholds: []\n"
+        ),
+        "analysis": (
+            "version: '1.0'\ntype: hr\ncolumns: {}\ndetectors: [integrity]\n"
+            "thresholds: {}\ncauses:\n"
+            "  - id: new_cause\n    title: 新分析原因\n    origin: raw\n"
+            "    priority: 0\n    when: {feature: data_complete, op: eq, value: false}\n"
         ),
     }
     return templates.get(kind, "{}\n")

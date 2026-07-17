@@ -40,6 +40,15 @@ CSV_FIELDS = (
     _field("info", "text", ""),
 )
 
+ANALYSIS_CAUSE_FIELDS = (
+    _field("id", required=True),
+    _field("title", required=True),
+    _field("origin", "choice", "raw", required=True, choices=("raw", "reference", "algorithm")),
+    _field("priority", "integer", 0),
+    _field("when", "mapping", {}, required=True, allow_custom_children=True),
+    _field("actions", "list", [], item_template=""),
+)
+
 RULE_SCHEMAS: dict[str, tuple[RuleFieldSchema, ...]] = {
     "chip": (
         _field("version", default="1.0", required=True),
@@ -139,6 +148,63 @@ RULE_SCHEMAS: dict[str, tuple[RuleFieldSchema, ...]] = {
         _field("thresholds", "list", [], item_template={"name": "", "value": 0}),
         _field("first_output_time", "boolean", False),
         _field("default_category", default="other"),
+    ),
+    "analysis": (
+        _field("version", default="1.0", required=True),
+        _field("type", "choice", "hr", required=True, choices=("hr", "spo2", "other")),
+        _field("description"),
+        _field(
+            "columns",
+            "mapping",
+            {},
+            required=True,
+            children=(
+                _field("reference"),
+                _field("prediction"),
+                _field("timestamp"),
+                _field("ppg_patterns", "list", [], item_template=""),
+                _field("acc", "list", [], item_template=""),
+            ),
+            allow_custom_children=True,
+        ),
+        _field("detectors", "list", [], required=True, item_template="integrity"),
+        _field(
+            "sampling",
+            "mapping",
+            {},
+            children=(
+                _field("sample_rate", "number", 25),
+                _field(
+                    "infer_timestamp_unit",
+                    "choice",
+                    "auto",
+                    choices=("auto", "s", "ms", "us"),
+                ),
+            ),
+            allow_custom_children=True,
+        ),
+        _field("thresholds", "mapping", {}, allow_custom_children=True),
+        _field(
+            "offline",
+            "mapping",
+            {},
+            children=(_field("enabled", "boolean", True),),
+            allow_custom_children=True,
+        ),
+        _field(
+            "causes",
+            "list",
+            [],
+            required=True,
+            children=ANALYSIS_CAUSE_FIELDS,
+            item_template={
+                "id": "new_cause",
+                "title": "新分析原因",
+                "origin": "raw",
+                "priority": 0,
+                "when": {"feature": "data_complete", "op": "eq", "value": False},
+            },
+        ),
     ),
     "config": (
         _field("rules_dir", "path"),

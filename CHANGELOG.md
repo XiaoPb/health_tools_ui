@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-07-18
+
+- Add top-level heart-rate and SpO2 analysis workflows backed by the public `analyze` API.
+- Add visual/source editing, validation, filtering, and built-in templates for analysis rules.
+- Upgrade and pin the public API dependency to ghealth-tools 0.5.1.
+- Remove duplicate wheel inclusion rules so release packages build successfully.
+
 ## 0.3.0 - 2026-07-17
 
 - Upgrade and pin the public API dependency to ghealth-tools 0.4.58.

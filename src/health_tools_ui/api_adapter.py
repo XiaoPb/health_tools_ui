@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from health_tools.api import (
+    AnalyzeRequest,
+    AnalyzeResult,
     BatchResult,
     CheckRequest,
     CheckResult,
@@ -24,6 +26,7 @@ from health_tools.api import (
     ProcessRequest,
     SplitRequest,
     ValidateRequest,
+    run_analyze,
     run_check,
     run_classify,
     run_config,
@@ -41,6 +44,7 @@ from health_tools.api import (
 
 Operation = tuple[type[Any], Callable[..., Any]]
 OPERATIONS: dict[str, Operation] = {
+    "analyze": (AnalyzeRequest, run_analyze),
     "parse": (ParseRequest, run_parse),
     "plot": (PlotRequest, run_plot),
     "classify": (ClassifyRequest, run_classify),
@@ -56,7 +60,7 @@ OPERATIONS: dict[str, Operation] = {
     "check": (CheckRequest, run_check),
 }
 PATH_FIELDS = {"input_path", "output_path", "target", "report_path", "sort_output"}
-TUPLE_FIELDS = {"extend_files", "ppg_maps"}
+TUPLE_FIELDS = {"extend_files", "ppg_maps", "focus"}
 
 
 def build_request(command: str, values: Mapping[str, Any]) -> Any:
@@ -110,7 +114,9 @@ def serialize_result(result: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         payload = {"value": payload}
     payload["kind"] = type(result).__name__
-    batch = result.batch if isinstance(result, (CheckResult, OfflineResult)) else result
+    batch = (
+        result.batch if isinstance(result, (AnalyzeResult, CheckResult, OfflineResult)) else result
+    )
     if isinstance(batch, BatchResult):
         payload["counts"] = {
             "ok": batch.ok_count,

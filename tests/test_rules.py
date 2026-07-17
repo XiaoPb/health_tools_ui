@@ -110,3 +110,22 @@ def test_patterns_and_multi_pattern_parse_use_supported_local_validation() -> No
         kind="parse",
     )
     assert parse.validate() == []
+
+
+def test_analysis_rule_is_detected_and_exposes_nested_schema(tmp_path: Path) -> None:
+    source = (
+        "version: '1.0'\ntype: hr\ncolumns:\n  reference: REF_RESULT0\n"
+        "detectors: [integrity]\nthresholds:\n  error: 10\ncauses:\n"
+        "  - id: incomplete\n    title: 数据不完整\n    origin: raw\n"
+        "    when: {feature: data_complete, op: eq, value: false}\n"
+    )
+    document = RuleDocument.from_source(source, tmp_path / "analysis" / "custom.yaml")
+
+    assert document.kind == "analysis"
+    assert document.validate() == []
+    assert {field["key"] for field in document.form_fields()} >= {
+        "columns",
+        "detectors",
+        "thresholds",
+        "causes",
+    }
