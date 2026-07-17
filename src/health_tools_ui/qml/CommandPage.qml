@@ -95,6 +95,16 @@ Item {
                             onSelect: Qt.callLater(syncVersions)
                             onDeselect: Qt.callLater(syncVersions)
                         }
+                        HusText {
+                            Layout.fillWidth: true
+                            visible: appModel.offlineVersionMode === "selected"
+                                     && appModel.offlineVersionChoices.length === 0
+                            text: appModel.locale === "zh_CN"
+                                  ? "未发现算法版本。请在设置中选择离线算法目录，或执行配置扫描。"
+                                  : "No algorithm versions found. Select the offline tools directory in Settings or scan the configuration."
+                            color: HusTheme.Primary.colorTextSecondary
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
 

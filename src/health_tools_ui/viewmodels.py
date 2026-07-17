@@ -150,13 +150,13 @@ class AppViewModel(QObject):
         self._revision = 0
         self._locale = str(settings.value("locale", "zh_CN"))
         self._dark_mode = str(settings.value("darkMode", "false")).lower() == "true"
-        self._offline_path = self._discover_offline_path()
-        self._status = TEXTS[self._locale]["ready"]
-        self._result: dict[str, Any] = {"kind": "none", "title": "", "items": []}
-        self._selected_log = ""
         self.rule_catalog = rule_catalog or RuleCatalogService(self)
         self.config_service = config_service or HealthConfigService()
         self.offline_catalog = OfflineCatalogService()
+        self._offline_path = self._discover_offline_path()
+        self._status = self.config_service.warning or TEXTS[self._locale]["ready"]
+        self._result: dict[str, Any] = {"kind": "none", "title": "", "items": []}
+        self._selected_log = ""
         self._offline_mode = "default"
         self._offline_selected_versions: list[str] = []
         self.rule_catalog.changed.connect(self._choices_changed)
@@ -422,7 +422,7 @@ class AppViewModel(QObject):
 
     @Slot(str, result=bool)
     def setOfflinePath(self, path: str) -> bool:
-        target = Path(path)
+        target = Path(path).expanduser().resolve()
         if not target.is_dir():
             self._set_status(f"Offline directory does not exist: {path}")
             return False
@@ -433,8 +433,12 @@ class AppViewModel(QObject):
             self._set_status(str(exc))
             return False
         self._offline_path = str(target)
+        self._offline_selected_versions = []
         self.settings.setValue("offlinePath", self._offline_path)
         self.settingsChanged.emit()
+        self._revision += 1
+        self.currentCommandChanged.emit()
+        self.valuesChanged.emit()
         self._set_status(f"Offline tools: {target}")
         return True
 

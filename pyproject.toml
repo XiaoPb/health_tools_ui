@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 authors = [{ name = "XiaoPb" }]
 dependencies = [
-    "ghealth-tools==0.4.56",
+    "ghealth-tools==0.4.57",
     "platformdirs>=4.2,<5",
     "psutil>=6,<8",
     "pyhuskarui==0.6.1.0",

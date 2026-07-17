@@ -27,6 +27,25 @@ class FakeConfigApi:
         return ConfigResult(request.action, source=self.source, revision=self.revision)
 
 
+class StubConfigService:
+    def __init__(self, offline_path: str) -> None:
+        self.offline_path = offline_path
+        self.warning = ""
+
+    def show(self) -> ConfigResult:
+        return ConfigResult(
+            ConfigAction.SHOW,
+            {"offline_tools_path": self.offline_path},
+        )
+
+    def set_offline_path(self, path: str) -> ConfigResult:
+        self.offline_path = path
+        return ConfigResult(
+            ConfigAction.SET_OFFLINE_PATH,
+            {"offline_tools_path": path},
+        )
+
+
 def config_model(source: str) -> tuple[RuleViewModel, FakeConfigApi]:
     api = FakeConfigApi(source)
     catalog = RuleCatalogService(list_runner=lambda _request: RuleCatalogResult())
@@ -50,6 +69,35 @@ def test_offline_version_modes_map_to_original_click_fields(qapp, tmp_path) -> N
     model.setOfflineVersionMode("all")
     assert model.boolValue("all_versions") is True
     assert model.value("versions") == ""
+
+
+def test_app_model_uses_injected_configured_offline_path(qapp, tmp_path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+
+    model = AppViewModel(settings, config_service=StubConfigService(str(tools)))
+
+    assert model.offlinePath == str(tools)
+
+
+def test_setting_offline_path_refreshes_version_bindings(qapp, tmp_path) -> None:
+    old_tools = tmp_path / "old"
+    new_tools = tmp_path / "new"
+    old_tools.mkdir()
+    new_tools.mkdir()
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    service = StubConfigService(str(old_tools))
+    model = AppViewModel(settings, config_service=service)
+    values_changed = QSignalSpy(model.valuesChanged)
+    command_changed = QSignalSpy(model.currentCommandChanged)
+
+    assert model.setOfflinePath(str(new_tools)) is True
+
+    assert model.offlinePath == str(new_tools.resolve())
+    assert service.offline_path == str(new_tools.resolve())
+    assert values_changed.count() == 1
+    assert command_changed.count() == 1
 
 
 def test_non_finite_command_numbers_are_rejected(qapp, tmp_path) -> None:

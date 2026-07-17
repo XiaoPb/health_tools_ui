@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Repair empty offline version selectors by scanning an empty catalog during startup.
+- Explain invalid or unscanned offline directories instead of showing a silent disabled control.
+- Refresh chip and version choices immediately after changing the offline tools directory.
+- Upgrade the public API dependency to ghealth-tools 0.4.57 for stable path migration.
+
 ## 0.2.0 - 2026-07-17
 
 - Migrate all 13 operations to the typed `health_tools.api` contract from ghealth-tools 0.4.56.
